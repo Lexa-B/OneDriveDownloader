@@ -23,7 +23,6 @@ from src.downloader import (
     DownloadStatus,
     download_file,
     should_skip_file,
-    verify_local_file,
     write_metadata_sidecar,
 )
 from src.graph import GraphClient
@@ -229,6 +228,19 @@ class OneDriveApp(App):
 
                 if result.status == DownloadStatus.SUCCESS:
                     write_metadata_sidecar(item, OUTPUT_DIR)
+                    if delete_remote:
+                        local_path = OUTPUT_DIR / item.full_path
+                        if local_path.exists() and local_path.stat().st_size == item.size:
+                            try:
+                                await self.graph_client.delete_item(item.id)
+                            except Exception as e:
+                                self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
+                        else:
+                            self.notify(
+                                f"NOT deleting {item.name} — local file missing or wrong size",
+                                severity="error",
+                                timeout=15,
+                            )
 
                 panel.files_done += 1
                 return result
@@ -256,50 +268,13 @@ class OneDriveApp(App):
         skipped = sum(1 for r in results if r.status == DownloadStatus.SKIPPED)
         failed_results = [r for r in results if r.status == DownloadStatus.FAILED]
 
-        if not failed and delete_remote:
-            # Verify every file exists locally before deleting anything remote.
-            # Only delete files we can confirm are on disk with correct size.
-            verified_ids: set[str] = set()
-            unverified: list[str] = []
-            for r in results:
-                if r.status in (DownloadStatus.SUCCESS, DownloadStatus.SKIPPED):
-                    if verify_local_file(r.item, OUTPUT_DIR):
-                        verified_ids.add(r.item.id)
-                    else:
-                        unverified.append(r.item.full_path)
-
-            if unverified:
-                self.notify(
-                    f"Skipping deletion — {len(unverified)} file(s) not verified locally:\n"
-                    + ", ".join(unverified[:5]),
-                    severity="error",
-                    timeout=30,
-                )
-            elif failed_results:
-                self.notify(
-                    f"Skipping deletion — {len(failed_results)} file(s) failed to download",
-                    severity="warning",
-                    timeout=15,
-                )
-            else:
-                # All files verified — safe to delete
-                deleted_files = 0
-                for item_id in verified_ids:
-                    try:
-                        await self.graph_client.delete_item(item_id)
-                        deleted_files += 1
-                    except Exception as e:
-                        self.notify(f"Delete failed: {e}", severity="warning")
-
-                # Delete folders bottom-up only if every file in them was deleted
-                for folder_id in reversed(all_folder_ids):
-                    try:
-                        await self.graph_client.delete_item(folder_id)
-                    except Exception as e:
-                        # Expected if folder still has undeleted children
-                        log.info("Folder delete skipped (may have remaining files): %s", e)
-
-                self.notify(f"Deleted {deleted_files} file(s) from OneDrive", timeout=10)
+        # Delete remote folders bottom-up, but only if every file succeeded
+        if not failed and delete_remote and not failed_results:
+            for folder_id in reversed(all_folder_ids):
+                try:
+                    await self.graph_client.delete_item(folder_id)
+                except Exception as e:
+                    self.notify(f"Delete folder failed: {e}", severity="warning")
 
         if not failed:
             summary = f"Done! {succeeded} downloaded, {skipped} skipped, {len(failed_results)} failed"
