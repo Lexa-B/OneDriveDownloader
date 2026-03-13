@@ -47,6 +47,31 @@ def verify_hash(data: bytes, expected_hash: str) -> bool:
     return h.base64_digest() == expected_hash
 
 
+def verify_local_file(item: DriveItem, output_dir: Path) -> DownloadResult:
+    """Verify a local file matches the expected size and hash."""
+    local_path = output_dir / item.full_path
+    if not local_path.exists():
+        return DownloadResult(item=item, status=DownloadStatus.FAILED, error="Local file missing")
+    if local_path.stat().st_size != item.size:
+        return DownloadResult(
+            item=item, status=DownloadStatus.FAILED,
+            error=f"Size mismatch: local {local_path.stat().st_size} vs remote {item.size}",
+        )
+    if item.quick_xor_hash is None:
+        return DownloadResult(item=item, status=DownloadStatus.MISSING_HASH)
+    hasher = QuickXorHash()
+    with open(local_path, "rb") as f:
+        while chunk := f.read(CHUNK_SIZE):
+            hasher.update(chunk)
+    computed = hasher.base64_digest()
+    if computed != item.quick_xor_hash:
+        return DownloadResult(
+            item=item, status=DownloadStatus.HASH_MISMATCH,
+            error=f"Expected {item.quick_xor_hash}, got {computed}",
+        )
+    return DownloadResult(item=item, status=DownloadStatus.SKIPPED)
+
+
 def write_metadata_sidecar(item: DriveItem, output_dir: Path) -> None:
     folder_path = output_dir / item.remote_path if item.remote_path else output_dir
     folder_path.mkdir(parents=True, exist_ok=True)
@@ -64,14 +89,6 @@ def write_metadata_sidecar(item: DriveItem, output_dir: Path) -> None:
         "quick_xor_hash": item.quick_xor_hash,
     }
     sidecar_path.write_text(json.dumps(existing, indent=2))
-
-
-def verify_local_file(item: DriveItem, output_dir: Path) -> bool:
-    """Check that a local copy exists with the correct size."""
-    local_path = output_dir / item.full_path
-    if not local_path.exists():
-        return False
-    return local_path.stat().st_size == item.size
 
 
 def set_file_timestamps(file_path: Path, item: DriveItem) -> None:

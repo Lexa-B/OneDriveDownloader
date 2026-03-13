@@ -23,6 +23,7 @@ from src.downloader import (
     DownloadStatus,
     download_file,
     should_skip_file,
+    verify_local_file,
     write_metadata_sidecar,
 )
 from src.graph import GraphClient
@@ -189,11 +190,6 @@ class OneDriveApp(App):
 
         async def download_one(item: DriveItem) -> DownloadResult:
             async with semaphore:
-                if should_skip_file(item, OUTPUT_DIR):
-                    panel.files_done += 1
-                    panel.bytes_done += item.size
-                    return DownloadResult(item=item, status=DownloadStatus.SKIPPED)
-
                 # Ensure we have the hash — fetch per-item if needed
                 if item.quick_xor_hash is None:
                     fetched = await self.graph_client.get_item(item.id)
@@ -206,6 +202,21 @@ class OneDriveApp(App):
                         status=DownloadStatus.MISSING_HASH,
                         error=f"No hash available for {item.full_path}",
                     )
+
+                # If local file already exists, verify size + hash instead of re-downloading
+                if should_skip_file(item, OUTPUT_DIR):
+                    result = verify_local_file(item, OUTPUT_DIR)
+                    if result.status == DownloadStatus.SKIPPED:
+                        # Verified — refresh metadata and delete remote if enabled
+                        write_metadata_sidecar(item, OUTPUT_DIR)
+                        if delete_remote:
+                            try:
+                                await self.graph_client.delete_item(item.id)
+                            except Exception as e:
+                                self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
+                    panel.files_done += 1
+                    panel.bytes_done += item.size
+                    return result
 
                 # Get download URL if we don't have one
                 if not item.download_url:
