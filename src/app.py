@@ -223,10 +223,11 @@ class OneDriveApp(App):
                     fetched = await self.graph_client.get_item(item.id)
                     item.download_url = fetched.download_url
 
-                panel.current_file = item.name
+                panel.file_started(item.id, item.name, item.size)
 
                 def on_progress(chunk_bytes: int) -> None:
                     panel.bytes_done += chunk_bytes
+                    panel.file_progress(item.id, chunk_bytes)
 
                 async with httpx.AsyncClient(timeout=300.0) as dl_client:
                     result = await download_file(
@@ -236,6 +237,8 @@ class OneDriveApp(App):
                         http_client=dl_client,
                         on_progress=on_progress,
                     )
+
+                panel.file_finished(item.id)
 
                 if result.status == DownloadStatus.SUCCESS:
                     write_metadata_sidecar(item, OUTPUT_DIR)
@@ -296,7 +299,6 @@ class OneDriveApp(App):
                     summary += f" (+{len(failed_results) - 10} more)"
             self.notify(summary, timeout=15)
 
-        panel.current_file = ""
         self._downloading = False
 
         tree = self.query_one(FolderTreeWidget)

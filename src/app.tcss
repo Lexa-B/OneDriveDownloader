@@ -35,9 +35,8 @@ StatusPanel {
     margin-bottom: 1;
 }
 
-#current-file {
+#active-downloads {
     margin-bottom: 1;
-    text-style: bold;
 }
 
 #overall-progress {
