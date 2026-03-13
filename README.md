@@ -42,7 +42,7 @@ On first run, you'll be prompted to visit a URL and enter a device code to sign 
 | Key     | Action                              |
 |---------|-------------------------------------|
 | Arrow keys | Navigate folder tree             |
-| Space   | Toggle folder selection             |
+| Space   | Toggle selection (files or folders)  |
 | Enter   | Expand/collapse folder              |
 | D       | Start download                      |
 | R       | Toggle remote deletion on/off       |
@@ -51,7 +51,8 @@ On first run, you'll be prompted to visit a URL and enter a device code to sign 
 ### What it does
 
 - Browses your OneDrive folder tree (lazy-loaded)
-- Downloads selected folders to `./outputs/`, preserving directory structure
+- Select entire folders or individual files for download
+- Downloads to `./outputs/`, preserving directory structure
 - Computes QuickXorHash inline during download and verifies against OneDrive's hash
 - Skips files already downloaded (by size match)
 - Writes `.metadata.json` sidecars with file IDs, timestamps, and hashes
