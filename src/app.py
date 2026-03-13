@@ -105,7 +105,7 @@ class OneDriveApp(App):
         panel = self.query_one(StatusPanel)
         panel.delete_remote = not panel.delete_remote
 
-    async def action_start_download(self) -> None:
+    def action_start_download(self) -> None:
         if self._downloading:
             return
 
@@ -119,17 +119,22 @@ class OneDriveApp(App):
         panel = self.query_one(StatusPanel)
         if panel.delete_remote:
             count = len(selected_folders) + len(selected_files)
-            confirmed = await self.push_screen_wait(
+
+            def on_confirm(confirmed: bool) -> None:
+                if confirmed:
+                    self._downloading = True
+                    self._run_download(selected_folders, selected_files, True)
+
+            self.push_screen(
                 ConfirmDialog(
                     f"You are about to download {count} item(s) "
                     f"and DELETE them from OneDrive.\n\nPress 'Yes' to confirm."
-                )
+                ),
+                callback=on_confirm,
             )
-            if not confirmed:
-                return
-
-        self._downloading = True
-        self._run_download(selected_folders, selected_files, panel.delete_remote)
+        else:
+            self._downloading = True
+            self._run_download(selected_folders, selected_files, False)
 
     @work(thread=False)
     async def _run_download(
