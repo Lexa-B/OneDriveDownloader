@@ -1,0 +1,58 @@
+/* src/app.tcss */
+Screen {
+    layout: grid;
+    grid-size: 2 2;
+    grid-columns: 2fr 1fr;
+    grid-rows: 1fr auto;
+}
+
+#folder-tree {
+    height: 100%;
+    border: solid green;
+    column-span: 1;
+}
+
+StatusPanel {
+    height: 100%;
+    border: solid blue;
+    padding: 1 2;
+}
+
+#footer-bar {
+    column-span: 2;
+    height: 3;
+    padding: 0 1;
+    background: $surface;
+    color: $text-muted;
+    content-align: center middle;
+}
+
+#selected-info {
+    margin-bottom: 1;
+}
+
+#delete-toggle {
+    margin-bottom: 1;
+}
+
+#current-file {
+    margin-bottom: 1;
+    text-style: bold;
+}
+
+#overall-progress {
+    margin-top: 1;
+}
+
+ConfirmDialog {
+    align: center middle;
+}
+
+#confirm-container {
+    width: 60;
+    height: auto;
+    max-height: 15;
+    border: thick $primary;
+    background: $surface;
+    padding: 1 2;
+}
