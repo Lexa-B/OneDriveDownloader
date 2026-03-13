@@ -10,29 +10,28 @@ SCOPES = ["Files.ReadWrite.All"]
 AUTHORITY = "https://login.microsoftonline.com/consumers"
 
 SETUP_INSTRUCTIONS = """
-╔══════════════════════════════════════════════════════════════╗
-║                   OneDrive Setup Required                    ║
-╠══════════════════════════════════════════════════════════════╣
-║                                                              ║
-║  1. Go to: https://portal.azure.com/#blade/                 ║
-║     Microsoft_AAD_RegisteredApps/ApplicationsListBlade       ║
-║                                                              ║
-║  2. Click "New registration"                                 ║
-║     - Name: OneDrive Downloader (or anything)                ║
-║     - Account type: "Personal Microsoft accounts only"       ║
-║     - Redirect URI: leave blank                              ║
-║                                                              ║
-║  3. Copy the "Application (client) ID"                       ║
-║                                                              ║
-║  4. Go to "Authentication" in the left sidebar               ║
-║     - Under "Advanced settings", set                         ║
-║       "Allow public client flows" to Yes                     ║
-║     - Save                                                   ║
-║                                                              ║
-║  5. Create config.json in the project root:                  ║
-║     {"client_id": "YOUR-CLIENT-ID-HERE"}                     ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                          OneDrive Setup Required                             ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║                                                                               ║
+║  1. Go to Azure App Registrations:                                            ║
+║     https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
+║                                                                               ║
+║  2. Click "New registration"                                                  ║
+║     - Name: OneDrive Downloader (or anything)                                 ║
+║     - Account type: "Personal Microsoft accounts only"                        ║
+║     - Redirect URI: leave blank                                               ║
+║                                                                               ║
+║  3. Copy the "Application (client) ID"                                        ║
+║                                                                               ║
+║  4. Go to "Authentication" in the left sidebar                                ║
+║     - Under "Advanced settings", set "Allow public client flows" to Yes       ║
+║     - Save                                                                    ║
+║                                                                               ║
+║  5. Create config.json in the project root:                                   ║
+║     {"client_id": "YOUR-CLIENT-ID-HERE"}                                      ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
 """.strip()
 
 
