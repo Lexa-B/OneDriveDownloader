@@ -18,5 +18,4 @@ onedrive_downloader.log
 *.log
 
 # Download outputs
-outputs/*
-!outputs/.gitkeep
+outputs/
