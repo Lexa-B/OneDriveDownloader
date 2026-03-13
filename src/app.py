@@ -86,15 +86,20 @@ class OneDriveApp(App):
         tree = self.query_one(FolderTreeWidget)
         if tree.cursor_node:
             tree.toggle_selected(tree.cursor_node)
-            panel = self.query_one(StatusPanel)
-            selected = tree.get_selected_folders()
-            panel.selected_count = len(selected)
-            panel.total_size = tree.get_total_selected_size()
+            self._update_selection_status()
 
     def action_expand_collapse(self) -> None:
         tree = self.query_one(FolderTreeWidget)
         if tree.cursor_node:
             tree.cursor_node.toggle()
+
+    def _update_selection_status(self) -> None:
+        tree = self.query_one(FolderTreeWidget)
+        panel = self.query_one(StatusPanel)
+        folders = tree.get_selected_folders()
+        files = tree.get_selected_files()
+        panel.selected_count = len(folders) + len(files)
+        panel.total_size = tree.get_total_selected_size()
 
     def action_toggle_delete(self) -> None:
         panel = self.query_one(StatusPanel)
@@ -105,16 +110,18 @@ class OneDriveApp(App):
             return
 
         tree = self.query_one(FolderTreeWidget)
-        selected = tree.get_selected_folders()
-        if not selected:
-            self.notify("No folders selected", severity="warning")
+        selected_folders = tree.get_selected_folders()
+        selected_files = tree.get_selected_files()
+        if not selected_folders and not selected_files:
+            self.notify("Nothing selected", severity="warning")
             return
 
         panel = self.query_one(StatusPanel)
         if panel.delete_remote:
+            count = len(selected_folders) + len(selected_files)
             confirmed = await self.push_screen_wait(
                 ConfirmDialog(
-                    f"You are about to download files from {len(selected)} folders "
+                    f"You are about to download {count} item(s) "
                     f"and DELETE them from OneDrive.\n\nPress 'Yes' to confirm."
                 )
             )
@@ -122,10 +129,12 @@ class OneDriveApp(App):
                 return
 
         self._downloading = True
-        self._run_download(selected, panel.delete_remote)
+        self._run_download(selected_folders, selected_files, panel.delete_remote)
 
     @work(thread=False)
-    async def _run_download(self, folders: list[FolderNode], delete_remote: bool) -> None:
+    async def _run_download(
+        self, folders: list[FolderNode], individual_files: list[DriveItem], delete_remote: bool
+    ) -> None:
         panel = self.query_one(StatusPanel)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -133,6 +142,13 @@ class OneDriveApp(App):
         all_items: list[DriveItem] = []
         empty_folder_ids: list[str] = []
         await self._collect_files(folders, all_items, empty_folder_ids)
+
+        # Add individually selected files (dedup by id)
+        seen_ids = {item.id for item in all_items}
+        for f in individual_files:
+            if f.id not in seen_ids:
+                all_items.append(f)
+                seen_ids.add(f.id)
 
         panel.files_total = len(all_items)
         panel.bytes_total = sum(i.size for i in all_items)
