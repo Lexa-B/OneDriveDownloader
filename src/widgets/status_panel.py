@@ -5,9 +5,11 @@ from textual.containers import Vertical
 from textual.reactive import reactive
 
 
-def _format_size(size_bytes: int) -> str:
+def _format_size(size_bytes: int | float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if size_bytes < 1024:
+            if unit == "B":
+                return f"{int(size_bytes)} {unit}"
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024
     return f"{size_bytes:.1f} PB"
