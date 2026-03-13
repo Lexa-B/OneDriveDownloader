@@ -23,6 +23,7 @@ from src.downloader import (
     DownloadStatus,
     download_file,
     should_skip_file,
+    verify_local_file,
     write_metadata_sidecar,
 )
 from src.graph import GraphClient
@@ -169,7 +170,9 @@ class OneDriveApp(App):
         # Collect all files from selected folders recursively
         all_items: list[DriveItem] = []
         all_folder_ids: list[str] = []
-        await self._collect_files(folders, all_items, all_folder_ids)
+        panel.enum_status = "Enumerating files..."
+        await self._collect_files(folders, all_items, all_folder_ids, panel)
+        panel.enum_status = ""
 
         # Add individually selected files (dedup by id)
         seen_ids = {item.id for item in all_items}
@@ -226,11 +229,6 @@ class OneDriveApp(App):
 
                 if result.status == DownloadStatus.SUCCESS:
                     write_metadata_sidecar(item, OUTPUT_DIR)
-                    if delete_remote:
-                        try:
-                            await self.graph_client.delete_item(item.id)
-                        except Exception as e:
-                            self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
 
                 panel.files_done += 1
                 return result
@@ -254,18 +252,56 @@ class OneDriveApp(App):
                 failed = True
                 break
 
-        if not failed:
-            # Delete remote folders bottom-up (deepest first)
-            if delete_remote:
+        succeeded = sum(1 for r in results if r.status == DownloadStatus.SUCCESS)
+        skipped = sum(1 for r in results if r.status == DownloadStatus.SKIPPED)
+        failed_results = [r for r in results if r.status == DownloadStatus.FAILED]
+
+        if not failed and delete_remote:
+            # Verify every file exists locally before deleting anything remote.
+            # Only delete files we can confirm are on disk with correct size.
+            verified_ids: set[str] = set()
+            unverified: list[str] = []
+            for r in results:
+                if r.status in (DownloadStatus.SUCCESS, DownloadStatus.SKIPPED):
+                    if verify_local_file(r.item, OUTPUT_DIR):
+                        verified_ids.add(r.item.id)
+                    else:
+                        unverified.append(r.item.full_path)
+
+            if unverified:
+                self.notify(
+                    f"Skipping deletion — {len(unverified)} file(s) not verified locally:\n"
+                    + ", ".join(unverified[:5]),
+                    severity="error",
+                    timeout=30,
+                )
+            elif failed_results:
+                self.notify(
+                    f"Skipping deletion — {len(failed_results)} file(s) failed to download",
+                    severity="warning",
+                    timeout=15,
+                )
+            else:
+                # All files verified — safe to delete
+                deleted_files = 0
+                for item_id in verified_ids:
+                    try:
+                        await self.graph_client.delete_item(item_id)
+                        deleted_files += 1
+                    except Exception as e:
+                        self.notify(f"Delete failed: {e}", severity="warning")
+
+                # Delete folders bottom-up only if every file in them was deleted
                 for folder_id in reversed(all_folder_ids):
                     try:
                         await self.graph_client.delete_item(folder_id)
                     except Exception as e:
-                        self.notify(f"Delete folder failed: {e}", severity="warning")
+                        # Expected if folder still has undeleted children
+                        log.info("Folder delete skipped (may have remaining files): %s", e)
 
-            succeeded = sum(1 for r in results if r.status == DownloadStatus.SUCCESS)
-            skipped = sum(1 for r in results if r.status == DownloadStatus.SKIPPED)
-            failed_results = [r for r in results if r.status == DownloadStatus.FAILED]
+                self.notify(f"Deleted {deleted_files} file(s) from OneDrive", timeout=10)
+
+        if not failed:
             summary = f"Done! {succeeded} downloaded, {skipped} skipped, {len(failed_results)} failed"
             if failed_results:
                 failed_names = ", ".join(r.item.full_path for r in failed_results[:10])
@@ -287,8 +323,14 @@ class OneDriveApp(App):
         folders: list[FolderNode],
         files: list[DriveItem],
         folder_ids: list[str],
+        panel: StatusPanel | None = None,
     ) -> None:
         for folder in folders:
+            if panel is not None:
+                panel.enum_status = (
+                    f"Enumerating: {folder.name}\n"
+                    f"{len(files)} files found, {len(folder_ids)} folders scanned"
+                )
             items = await self.graph_client.list_children(folder.item_id)
             child_files = [i for i in items if not i.is_folder]
             child_folders = [i for i in items if i.is_folder]
@@ -301,7 +343,7 @@ class OneDriveApp(App):
             files.extend(child_files)
             for item in child_folders:
                 sub_folder = FolderNode(item_id=item.id, name=item.name, size=item.size)
-                await self._collect_files([sub_folder], files, folder_ids)
+                await self._collect_files([sub_folder], files, folder_ids, panel)
 
             # Add after recursing so children come first (depth-first order)
             folder_ids.append(folder.item_id)

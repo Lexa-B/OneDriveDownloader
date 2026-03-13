@@ -66,6 +66,14 @@ def write_metadata_sidecar(item: DriveItem, output_dir: Path) -> None:
     sidecar_path.write_text(json.dumps(existing, indent=2))
 
 
+def verify_local_file(item: DriveItem, output_dir: Path) -> bool:
+    """Check that a local copy exists with the correct size."""
+    local_path = output_dir / item.full_path
+    if not local_path.exists():
+        return False
+    return local_path.stat().st_size == item.size
+
+
 def set_file_timestamps(file_path: Path, item: DriveItem) -> None:
     mtime = item.modified.timestamp()
     os.utime(file_path, (mtime, mtime))
