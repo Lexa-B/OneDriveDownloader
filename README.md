@@ -1,33 +1,72 @@
 # OneDrive Downloader
 
-A terminal UI for bulk-downloading files from OneDrive Personal with hash verification and optional remote deletion.
+A terminal UI for bulk-downloading files from OneDrive Personal with hash verification, metadata preservation, and optional remote deletion.
 
-Built for one-time migrations off OneDrive — browse folders, select what you want, download with integrity checks, optionally delete the originals.
+Built for one-time migrations off OneDrive — browse your folder tree, select what you want, download with integrity checks, and optionally delete the originals.
 
-## Setup
+## Features
 
-Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/).
+- **Interactive folder tree** — lazy-loaded from OneDrive, browse and select folders or individual files
+- **Checkbox selection** — toggle entire folders or pick specific files; partial-selection indicators for mixed states
+- **Chunked streaming downloads** — 4 MB chunks, up to 4 files in parallel
+- **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch
+- **Resume support** — skips files already downloaded (by size match); re-run to pick up where you left off
+- **Metadata preservation** — restores `lastModifiedDateTime` as local file mtime; writes `.metadata.json` sidecars with full file metadata (IDs, timestamps, hashes)
+- **Remote deletion (on by default)** — after verified download, deletes originals from OneDrive; toggle off with `R` before downloading
+- **Rate limit handling** — automatic retry on HTTP 429 (respects Retry-After header, exponential fallback); automatic token refresh on 401
+- **Directory structure preserved** — local `outputs/` mirrors your OneDrive folder hierarchy
+
+> **Warning:** Remote deletion is **enabled by default**. Press `R` to toggle it off before pressing `D` to download. When enabled, a confirmation prompt appears before any files are deleted.
+
+## Prerequisites
+
+- **Python 3.14+** — if you don't have it, [uv](https://docs.astral.sh/uv/) can install it for you: `uv python install 3.14`
+- **uv** — install from [docs.astral.sh/uv](https://docs.astral.sh/uv/)
+- **A Microsoft account** with OneDrive Personal (free accounts work fine)
+
+## Azure App Registration
+
+This app uses the [device code OAuth flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code) to authenticate with your Microsoft account. You need a free Azure app registration — this takes about 3 minutes and costs nothing.
+
+### Why these settings?
+
+- **Device code flow** lets you authenticate without a redirect URI or local web server — you just paste a code into your browser.
+- **"Personal Microsoft accounts only"** is required because OneDrive Personal uses Microsoft's `/consumers` authentication endpoint. Work/school accounts use a different endpoint.
+- **"Allow public client flows"** tells Azure this app authenticates without a client secret. Device code flow is a public client flow — the app never holds a secret, only a user-granted token.
+- **`Files.ReadWrite.All` scope** grants read access (to browse and download) and write access (to delete originals after verified download). If you don't plan to use remote deletion, the app still requires this scope because it's a single permission that covers both.
+
+### Steps
+
+1. Go to [Azure App Registrations](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) (sign in with any Microsoft account)
+2. Click **New registration**
+   - **Name:** anything you like (e.g., "OneDrive Downloader")
+   - **Supported account types:** select **Personal Microsoft accounts only**
+   - **Redirect URI:** leave blank
+3. After creation, you'll land on the app's overview page. Copy the **Application (client) ID** — this is the only value you need.
+4. In the left sidebar, click **Authentication**
+   - Scroll to **Advanced settings**
+   - Set **Allow public client flows** to **Yes**
+   - Click **Save**
+
+No client secret is needed. No API permissions need to be configured — the app requests `Files.ReadWrite.All` at runtime via the device code prompt, and the user consents interactively.
+
+## Installation
 
 ```bash
+git clone <repo-url>
+cd OneDriveDownloader
 uv sync
 ```
 
-### Azure App Registration
+### Configuration
 
-The app uses Microsoft's device code OAuth flow. You need a free Azure app registration:
-
-1. Go to [Azure App Registrations](https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
-2. Click **New registration**
-   - Name: anything (e.g. "OneDrive Downloader")
-   - Account type: **Personal Microsoft accounts only**
-   - Redirect URI: leave blank
-3. Copy the **Application (client) ID**
-4. Go to **Authentication** in the sidebar, set **Allow public client flows** to **Yes**, save
-5. Create `config.json` in the project root:
+Create `config.json` in the project root with your Application (client) ID from the Azure registration:
 
 ```json
 {"client_id": "YOUR-CLIENT-ID-HERE"}
 ```
+
+This file is gitignored and will not be committed.
 
 ## Usage
 
@@ -35,60 +74,131 @@ The app uses Microsoft's device code OAuth flow. You need a free Azure app regis
 uv run python -m src
 ```
 
-On first run, you'll be prompted to visit a URL and enter a device code to sign in. Tokens are refreshed automatically during long sessions.
+Or using the installed script alias:
+
+```bash
+uv run onedrive-dl
+```
+
+### First run
+
+On first launch, the app will display a URL and a device code:
+
+```
+To sign in, visit: https://microsoft.com/devicelogin
+Enter code: ABCD1234
+```
+
+Open the URL in any browser, enter the code, and sign in with your Microsoft account. The app will cache your tokens in `.msal_cache.json` (gitignored) for future sessions — you won't need to sign in again unless the refresh token expires.
 
 ### Controls
 
-| Key     | Action                              |
-|---------|-------------------------------------|
-| Arrow keys | Navigate folder tree             |
-| Space   | Toggle selection (files or folders)  |
-| Enter   | Expand/collapse folder              |
-| D       | Start download                      |
-| R       | Toggle remote deletion on/off       |
-| Q       | Quit                                |
+| Key        | Action                            |
+|------------|-----------------------------------|
+| Arrow keys | Navigate the folder tree          |
+| Space      | Toggle selection (file or folder) |
+| Enter      | Expand / collapse folder          |
+| D          | Start download                    |
+| R          | Toggle remote deletion on/off     |
+| Q          | Quit                              |
 
-### What it does
+### Download behavior
 
-- Browses your OneDrive folder tree (lazy-loaded)
-- Select entire folders or individual files for download
-- Downloads to `./outputs/`, preserving directory structure
-- Computes QuickXorHash inline during download and verifies against OneDrive's hash
-- Skips files already downloaded (by size match)
-- Writes `.metadata.json` sidecars with file IDs, timestamps, and hashes
-- Preserves `lastModifiedDateTime` as the local file's mtime
-- Optionally deletes remote files and folders after verified download (with confirmation prompt)
-- Reloads the folder tree from OneDrive after download completes
-- Hard-stops on any hash mismatch — no silent corruption
+1. Select folders or individual files in the tree (Space to toggle)
+2. Check the status panel on the right — it shows selection count, total size, and deletion toggle state
+3. Press D to start downloading
+4. If remote deletion is on, a confirmation dialog appears first
+5. Files download to `./outputs/`, preserving the OneDrive directory structure
+6. After download completes, the folder tree reloads from OneDrive to reflect any deletions
 
-### Remote deletion
+## How It Works
 
-Deletion is **on by default**. Press R to toggle it off before downloading. When on, the app will prompt for confirmation before proceeding.
+```
+Sign in (device code flow)
+        │
+        ▼
+Browse folder tree (lazy-loaded from Graph API)
+        │
+        ▼
+Select folders / files (Space to toggle)
+        │
+        ▼
+Press D → collect all files from selected folders
+        │
+        ▼
+Download each file (4 MB chunks, up to 4 in parallel)
+  ├─ Compute QuickXorHash inline while streaming
+  ├─ Compare hash against OneDrive's hash
+  ├─ Hash match → save file, set timestamps, write metadata sidecar
+  ├─ Hash mismatch → HARD STOP all downloads
+  └─ File exists with matching size → skip (already downloaded)
+        │
+        ▼
+(If deletion enabled) Delete remote files, then folders bottom-up
+        │
+        ▼
+Reload folder tree from OneDrive
+```
 
-## Project Structure
+### Hash verification
+
+OneDrive Personal uses [QuickXorHash](https://learn.microsoft.com/en-us/onedrive/developer/code-snippets/quickxorhash), a proprietary Microsoft hash algorithm. The app computes this hash inline while streaming each chunk — no extra file re-read needed. If the computed hash doesn't match OneDrive's hash, the pipeline hard-stops: all in-flight downloads are cancelled and no file is saved. This guarantees no silent corruption.
+
+If the OneDrive API omits the hash in folder listings (which happens occasionally), the app fetches it via a per-item API call before downloading.
+
+### Resume
+
+Re-running the app after an interrupted session automatically picks up where you left off. Files that already exist locally with the correct size are skipped — they were hash-verified on the original download pass, so a size match is sufficient for resume.
+
+## Architecture
 
 ```
 src/
-  app.py              # Textual app — wires everything together
-  app.tcss            # Textual CSS layout
-  auth.py             # MSAL device code flow + silent token refresh
-  downloader.py       # Chunked download with hash verification
-  graph.py            # Async Microsoft Graph API client
-  models.py           # DriveItem and FolderNode dataclasses
-  quickxor.py         # QuickXorHash (Microsoft's OneDrive hash)
-  widgets/
-    folder_tree.py    # Tree widget with checkboxes and lazy loading
-    status_panel.py   # Progress and status display
-tests/
-  test_auth.py
-  test_downloader.py
-  test_graph.py
-  test_models.py
-  test_quickxor.py
+├── app.py              Main Textual app — wires auth, API, UI, and download together
+├── app.tcss            Textual CSS layout (two-panel grid)
+├── auth.py             MSAL device code flow, silent token refresh, config loading
+├── downloader.py       Chunked streaming download, inline hash verification, metadata sidecars
+├── graph.py            Async Microsoft Graph API client with pagination, 429 backoff, 401 refresh
+├── models.py           DriveItem (parsed API response) and FolderNode (tree selection state)
+├── quickxor.py         QuickXorHash — port of Microsoft's C# reference implementation
+└── widgets/
+    ├── folder_tree.py  Textual Tree subclass with lazy loading, checkboxes, file/folder selection
+    └── status_panel.py Reactive progress display (selection count, download progress, ETA)
 ```
+
+### Data flow
+
+**Authentication:** `auth.py` handles the MSAL device code flow and provides a `TokenProvider` that `graph.py` calls when it receives a 401 response. Tokens are cached locally in `.msal_cache.json`.
+
+**Browsing:** `folder_tree.py` calls `graph.py` to lazily load folder contents when the user expands a tree node. Each API response is parsed into `DriveItem` objects via `models.py`.
+
+**Downloading:** When the user presses D, `app.py` collects all files from selected folders (recursively via `graph.py`), then dispatches concurrent download tasks through `downloader.py`. Each task streams the file, computes the hash via `quickxor.py`, verifies it, writes the file and metadata sidecar, and optionally deletes the remote via `graph.py`.
+
+**Progress:** `status_panel.py` uses Textual's reactive properties — `app.py` updates counters and the panel re-renders automatically.
+
+## Troubleshooting
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| `AADSTS` error codes during sign-in | Azure app misconfigured | Verify: account type is "Personal Microsoft accounts only", public client flows enabled, no redirect URI set |
+| "No cached account — re-run the app" | Token cache expired or corrupted | Delete `.msal_cache.json` and re-run — you'll be prompted to sign in again |
+| "PIPELINE STOPPED: HASH_MISMATCH" | Downloaded bytes don't match OneDrive's hash | This is a safety feature. Re-run the app — the file will be retried. If it persists, the file may be corrupted on OneDrive's side |
+| "PIPELINE STOPPED: MISSING_HASH" | OneDrive API returned no hash even after per-item fetch | Rare server-side issue. Wait and retry later |
+| Downloads seem slow / pausing | HTTP 429 rate limiting from Microsoft | The app retries automatically (respects the server's Retry-After header). Just wait — it will resume |
+| `config.json not found` | Missing configuration file | Create `config.json` in the project root per the Installation section |
 
 ## Testing
 
 ```bash
 uv run pytest -v
 ```
+
+Tests use `httpx.MockTransport` to simulate Graph API responses — no real Microsoft account needed. Test coverage includes models, auth config loading, Graph API client (pagination, retry, token refresh), download engine (hash verification, skip logic, metadata), and QuickXorHash (reference vectors from Microsoft's spec).
+
+## License
+
+[MIT](LICENSE)
+
+## Citation
+
+If you use this software in research, see [CITATION.cff](CITATION.cff) for citation metadata.
