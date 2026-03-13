@@ -1,0 +1,21 @@
+[project]
+name = "onedrivedownloader"
+version = "0.0.0"
+description = "One-time OneDrive downloader with TUI"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "msal>=1.31.0",
+    "httpx>=0.28.0",
+    "textual>=3.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[project.scripts]
+onedrive-dl = "src.app:main"

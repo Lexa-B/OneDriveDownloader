@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# App config and auth
+config.json
+.msal_cache.json
+
+# Download outputs
+outputs/*
+!outputs/.gitkeep
