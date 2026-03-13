@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from rich.text import Text
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
 from src.models import FolderNode
+from src.widgets.status_panel import _format_size
 
 if TYPE_CHECKING:
     from src.graph import GraphClient
@@ -15,6 +17,13 @@ CHECK_ICONS = {
     (True, False): "\u2611",   # ☑
     (False, True): "\u2612",   # ☒ partial
 }
+
+
+def _file_label(name: str, size: int) -> Text:
+    label = Text()
+    label.append(f"  {name}", style="dim")
+    label.append(f"  {_format_size(size)}", style="dim italic")
+    return label
 
 
 def _label(node: FolderNode) -> str:
@@ -31,7 +40,8 @@ class FolderTreeWidget(Tree[FolderNode]):
 
     async def load_root(self) -> None:
         items = await self.graph_client.list_children("root")
-        for item in items:
+        folders_first = sorted(items, key=lambda i: (not i.is_folder, i.name.lower()))
+        for item in folders_first:
             if item.is_folder:
                 folder = FolderNode(
                     item_id=item.id,
@@ -45,6 +55,8 @@ class FolderTreeWidget(Tree[FolderNode]):
                 )
                 # Add placeholder so the expand arrow shows
                 tree_node.add_leaf("Loading...")
+            else:
+                self.root.add_leaf(_file_label(item.name, item.size))
 
     async def _load_children(self, node: TreeNode[FolderNode]) -> None:
         folder = node.data
@@ -53,7 +65,8 @@ class FolderTreeWidget(Tree[FolderNode]):
 
         node.remove_children()
         items = await self.graph_client.list_children(folder.item_id)
-        for item in items:
+        folders_first = sorted(items, key=lambda i: (not i.is_folder, i.name.lower()))
+        for item in folders_first:
             if item.is_folder:
                 child_folder = FolderNode(
                     item_id=item.id,
@@ -67,6 +80,8 @@ class FolderTreeWidget(Tree[FolderNode]):
                     allow_expand=True,
                 )
                 child_node.add_leaf("Loading...")
+            else:
+                node.add_leaf(_file_label(item.name, item.size))
 
         folder.loaded = True
 
