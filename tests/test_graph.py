@@ -58,7 +58,7 @@ def _item_response():
 def _route_handler(request: httpx.Request) -> httpx.Response:
     path = request.url.path
 
-    if path == "/v1.0/me/drive/root/children" or "/children" in path:
+    if path == "/me/drive/root/children" or "/children" in path:
         return httpx.Response(200, json=_children_response())
     if "/items/file1" in path and request.method == "GET":
         return httpx.Response(200, json=_item_response())

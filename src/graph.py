@@ -39,9 +39,9 @@ class GraphClient:
     async def list_children(self, item_id: str) -> list[DriveItem]:
         items: list[DriveItem] = []
         if item_id == "root":
-            url = "/v1.0/me/drive/root/children"
+            url = "/me/drive/root/children"
         else:
-            url = f"/v1.0/me/drive/items/{item_id}/children"
+            url = f"/me/drive/items/{item_id}/children"
 
         while url:
             response = await self._request("GET", url)
@@ -53,11 +53,11 @@ class GraphClient:
         return items
 
     async def get_item(self, item_id: str) -> DriveItem:
-        response = await self._request("GET", f"/v1.0/me/drive/items/{item_id}")
+        response = await self._request("GET", f"/me/drive/items/{item_id}")
         return DriveItem.from_api(response.json())
 
     async def delete_item(self, item_id: str) -> None:
-        await self._request("DELETE", f"/v1.0/me/drive/items/{item_id}")
+        await self._request("DELETE", f"/me/drive/items/{item_id}")
 
     async def close(self) -> None:
         await self._client.aclose()
