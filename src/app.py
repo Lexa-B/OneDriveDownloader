@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from textual.widgets import Button, Footer, Header, Static
 
 from src.auth import (
     SETUP_INSTRUCTIONS,
+    TokenProvider,
     acquire_token,
     build_msal_app,
     load_config,
@@ -34,7 +36,16 @@ PROJECT_ROOT = Path(__file__).parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 CACHE_PATH = PROJECT_ROOT / ".msal_cache.json"
+LOG_PATH = PROJECT_ROOT / "onedrive_downloader.log"
 MAX_CONCURRENT = 4
+
+logging.basicConfig(
+    filename=str(LOG_PATH),
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("onedrive_downloader")
 
 
 class ConfirmDialog(ModalScreen[bool]):
@@ -68,6 +79,18 @@ class OneDriveApp(App):
         super().__init__()
         self.graph_client = graph_client
         self._downloading = False
+
+    def notify(self, message, *, title="", severity="information", timeout=None):
+        level = {"error": logging.ERROR, "warning": logging.WARNING}.get(
+            severity, logging.INFO
+        )
+        log.log(level, "%s", message)
+        kwargs = {}
+        if title:
+            kwargs["title"] = title
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return super().notify(message, severity=severity, **kwargs)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -145,8 +168,8 @@ class OneDriveApp(App):
 
         # Collect all files from selected folders recursively
         all_items: list[DriveItem] = []
-        empty_folder_ids: list[str] = []
-        await self._collect_files(folders, all_items, empty_folder_ids)
+        all_folder_ids: list[str] = []
+        await self._collect_files(folders, all_items, all_folder_ids)
 
         # Add individually selected files (dedup by id)
         seen_ids = {item.id for item in all_items}
@@ -232,13 +255,13 @@ class OneDriveApp(App):
                 break
 
         if not failed:
-            # Delete empty remote folders if deletion enabled
+            # Delete remote folders bottom-up (deepest first)
             if delete_remote:
-                for folder_id in empty_folder_ids:
+                for folder_id in reversed(all_folder_ids):
                     try:
                         await self.graph_client.delete_item(folder_id)
                     except Exception as e:
-                        self.notify(f"Delete empty folder failed: {e}", severity="warning")
+                        self.notify(f"Delete folder failed: {e}", severity="warning")
 
             succeeded = sum(1 for r in results if r.status == DownloadStatus.SUCCESS)
             skipped = sum(1 for r in results if r.status == DownloadStatus.SKIPPED)
@@ -254,11 +277,16 @@ class OneDriveApp(App):
         panel.current_file = ""
         self._downloading = False
 
+        tree = self.query_one(FolderTreeWidget)
+        await tree.reload()
+        panel.selected_count = 0
+        panel.total_size = 0
+
     async def _collect_files(
         self,
         folders: list[FolderNode],
         files: list[DriveItem],
-        empty_folder_ids: list[str],
+        folder_ids: list[str],
     ) -> None:
         for folder in folders:
             items = await self.graph_client.list_children(folder.item_id)
@@ -270,14 +298,13 @@ class OneDriveApp(App):
                 local_dir = OUTPUT_DIR / item.full_path
                 local_dir.mkdir(parents=True, exist_ok=True)
 
-            if not child_files and not child_folders:
-                # Empty folder — track for remote deletion
-                empty_folder_ids.append(folder.item_id)
-
             files.extend(child_files)
             for item in child_folders:
                 sub_folder = FolderNode(item_id=item.id, name=item.name, size=item.size)
-                await self._collect_files([sub_folder], files, empty_folder_ids)
+                await self._collect_files([sub_folder], files, folder_ids)
+
+            # Add after recursing so children come first (depth-first order)
+            folder_ids.append(folder.item_id)
 
 
 def main() -> None:
@@ -288,13 +315,9 @@ def main() -> None:
 
     msal_app = build_msal_app(config, CACHE_PATH)
     token = acquire_token(msal_app, CACHE_PATH)
+    token_provider = TokenProvider(msal_app, CACHE_PATH)
 
-    http_client = httpx.AsyncClient(
-        base_url="https://graph.microsoft.com/v1.0",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=30.0,
-    )
-    graph = GraphClient(http_client=http_client)
+    graph = GraphClient(access_token=token, token_provider=token_provider)
 
     app = OneDriveApp(graph_client=graph)
     app.run()

@@ -89,3 +89,22 @@ def acquire_token(app: msal.PublicClientApplication, cache_path: Path) -> str:
         cache_path.write_text(app.token_cache.serialize())
 
     return result["access_token"]
+
+
+class TokenProvider:
+    """Provides fresh access tokens, refreshing silently via MSAL when needed."""
+
+    def __init__(self, app: msal.PublicClientApplication, cache_path: Path) -> None:
+        self._app = app
+        self._cache_path = cache_path
+
+    def get_token(self) -> str:
+        accounts = self._app.get_accounts()
+        if not accounts:
+            raise RuntimeError("No cached account — re-run the app to sign in again")
+        result = self._app.acquire_token_silent(SCOPES, account=accounts[0])
+        if not result or "access_token" not in result:
+            raise RuntimeError("Token refresh failed — re-run the app to sign in again")
+        if self._app.token_cache.has_state_changed:
+            self._cache_path.write_text(self._app.token_cache.serialize())
+        return result["access_token"]

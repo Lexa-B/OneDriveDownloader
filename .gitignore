@@ -13,6 +13,10 @@ wheels/
 config.json
 .msal_cache.json
 
+# Log files
+onedrive_downloader.log
+*.log
+
 # Download outputs
 outputs/*
 !outputs/.gitkeep

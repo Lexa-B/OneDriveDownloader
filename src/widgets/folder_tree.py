@@ -50,6 +50,12 @@ class FolderTreeWidget(Tree[NodeData]):
         self.show_root = False
         self._selected_files: dict[str, DriveItem] = {}  # item_id -> DriveItem
 
+    async def reload(self) -> None:
+        """Clear all state and reload the tree from the API."""
+        self.root.remove_children()
+        self._selected_files.clear()
+        await self.load_root()
+
     async def load_root(self) -> None:
         items = await self.graph_client.list_children("root")
         folders_first = sorted(items, key=lambda i: (not i.is_folder, i.name.lower()))
@@ -150,19 +156,19 @@ class FolderTreeWidget(Tree[NodeData]):
             self._refresh_labels(child)
         # Refresh parent for partial state
         if node.parent and isinstance(node.parent.data, FolderNode):
-            has_selected = any(
-                c.data.selected for c in node.parent.children if isinstance(c.data, FolderNode)
-            )
-            all_selected = all(
-                c.data.selected for c in node.parent.children if isinstance(c.data, FolderNode)
-            )
-            if all_selected:
-                node.parent.data.selected = True
-            elif has_selected:
-                node.parent.data.selected = False
-            else:
-                node.parent.data.selected = False
-            node.parent.set_label(_folder_label(node.parent.data))
+            folder_children = [
+                c for c in node.parent.children if isinstance(c.data, FolderNode)
+            ]
+            if folder_children:
+                has_selected = any(c.data.selected for c in folder_children)
+                all_selected = all(c.data.selected for c in folder_children)
+                if all_selected:
+                    node.parent.data.selected = True
+                elif has_selected:
+                    node.parent.data.selected = False
+                else:
+                    node.parent.data.selected = False
+                node.parent.set_label(_folder_label(node.parent.data))
 
     def get_selected_folders(self) -> list[FolderNode]:
         result: list[FolderNode] = []
@@ -192,3 +198,17 @@ class FolderTreeWidget(Tree[NodeData]):
         folder_size = sum(f.size for f in self.get_selected_folders())
         file_size = sum(f.size for f in self.get_selected_files())
         return folder_size + file_size
+
+    def clear_all_selections(self) -> None:
+        """Deselect all folders and files, refreshing labels."""
+        self._clear_node_selections(self.root)
+        self._selected_files.clear()
+
+    def _clear_node_selections(self, node: TreeNode[NodeData]) -> None:
+        if isinstance(node.data, FolderNode):
+            node.data.selected = False
+            node.set_label(_folder_label(node.data))
+        elif isinstance(node.data, DriveItem):
+            node.set_label(_file_label(node.data.name, node.data.size, selected=False))
+        for child in node.children:
+            self._clear_node_selections(child)

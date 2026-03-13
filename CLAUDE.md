@@ -15,8 +15,8 @@ One-time OneDrive downloader TUI. Python 3.14, uv, Textual.
 
 - `src/models.py` — `DriveItem` (parsed from Graph API JSON) and `FolderNode` (tree selection state)
 - `src/quickxor.py` — `QuickXorHash`, port of Microsoft's C# reference implementation
-- `src/auth.py` — MSAL device code flow, config loading from `config.json`
-- `src/graph.py` — `GraphClient` wrapping httpx with pagination and 429 retry
+- `src/auth.py` — MSAL device code flow, `TokenProvider` for silent refresh, config loading from `config.json`
+- `src/graph.py` — `GraphClient` wrapping httpx with pagination, 429 retry, and 401 token refresh
 - `src/downloader.py` — chunked streaming download, inline hash verification, metadata sidecars
 - `src/widgets/folder_tree.py` — Textual `Tree` subclass with lazy loading and checkbox selection
 - `src/widgets/status_panel.py` — reactive progress display

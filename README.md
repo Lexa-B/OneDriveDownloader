@@ -35,7 +35,7 @@ The app uses Microsoft's device code OAuth flow. You need a free Azure app regis
 uv run python -m src
 ```
 
-On first run, you'll be prompted to visit a URL and enter a device code to sign in.
+On first run, you'll be prompted to visit a URL and enter a device code to sign in. Tokens are refreshed automatically during long sessions.
 
 ### Controls
 
@@ -57,7 +57,8 @@ On first run, you'll be prompted to visit a URL and enter a device code to sign 
 - Skips files already downloaded (by size match)
 - Writes `.metadata.json` sidecars with file IDs, timestamps, and hashes
 - Preserves `lastModifiedDateTime` as the local file's mtime
-- Optionally deletes remote files after verified download (with confirmation prompt)
+- Optionally deletes remote files and folders after verified download (with confirmation prompt)
+- Reloads the folder tree from OneDrive after download completes
 - Hard-stops on any hash mismatch — no silent corruption
 
 ### Remote deletion
@@ -70,7 +71,7 @@ Deletion is **on by default**. Press R to toggle it off before downloading. When
 src/
   app.py              # Textual app — wires everything together
   app.tcss            # Textual CSS layout
-  auth.py             # MSAL device code flow
+  auth.py             # MSAL device code flow + silent token refresh
   downloader.py       # Chunked download with hash verification
   graph.py            # Async Microsoft Graph API client
   models.py           # DriveItem and FolderNode dataclasses
