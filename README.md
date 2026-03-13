@@ -9,10 +9,10 @@ Built for one-time migrations off OneDrive — browse your folder tree, select w
 - **Interactive folder tree** — lazy-loaded from OneDrive, browse and select folders or individual files
 - **Checkbox selection** — toggle entire folders or pick specific files; partial-selection indicators for mixed states
 - **Chunked streaming downloads** — 4 MB chunks, up to 4 files in parallel
-- **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch
-- **Resume support** — skips files already downloaded (by size match); re-run to pick up where you left off
+- **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch. Already-downloaded files are re-verified by hash before any remote deletion
+- **Resume support** — re-running picks up where you left off; existing files are hash-verified locally instead of re-downloaded
 - **Metadata preservation** — restores `lastModifiedDateTime` as local file mtime; writes `.metadata.json` sidecars with full file metadata (IDs, timestamps, hashes)
-- **Remote deletion (on by default)** — after verified download, deletes originals from OneDrive; toggle off with `R` before downloading
+- **Remote deletion (on by default)** — deletes originals from OneDrive only after the local copy is verified on disk (exists + correct size + hash match); toggle off with `R` before downloading
 - **Rate limit handling** — automatic retry on HTTP 429 (respects Retry-After header, exponential fallback); automatic token refresh on 401
 - **Directory structure preserved** — local `outputs/` mirrors your OneDrive folder hierarchy
 
@@ -126,15 +126,14 @@ Select folders / files (Space to toggle)
 Press D → collect all files from selected folders
         │
         ▼
-Download each file (4 MB chunks, up to 4 in parallel)
-  ├─ Compute QuickXorHash inline while streaming
-  ├─ Compare hash against OneDrive's hash
-  ├─ Hash match → save file, set timestamps, write metadata sidecar
+For each file (up to 4 in parallel):
+  ├─ Already local with matching size?
+  │   ├─ Yes → verify hash of local copy
+  │   └─ No  → download in 4 MB chunks, compute hash inline
+  ├─ Hash match → write metadata sidecar
+  │   └─ (If deletion enabled) verify local file on disk, then delete remote
   ├─ Hash mismatch → HARD STOP all downloads
-  └─ File exists with matching size → skip (already downloaded)
-        │
-        ▼
-(If deletion enabled) Delete remote files, then folders bottom-up
+  └─ Download failure → skip, don't delete remote
         │
         ▼
 Reload folder tree from OneDrive
@@ -142,13 +141,13 @@ Reload folder tree from OneDrive
 
 ### Hash verification
 
-OneDrive Personal uses [QuickXorHash](https://learn.microsoft.com/en-us/onedrive/developer/code-snippets/quickxorhash), a proprietary Microsoft hash algorithm. The app computes this hash inline while streaming each chunk — no extra file re-read needed. If the computed hash doesn't match OneDrive's hash, the pipeline hard-stops: all in-flight downloads are cancelled and no file is saved. This guarantees no silent corruption.
+OneDrive Personal uses [QuickXorHash](https://learn.microsoft.com/en-us/onedrive/developer/code-snippets/quickxorhash), a proprietary Microsoft hash algorithm. For fresh downloads, the hash is computed inline while streaming each chunk. For already-downloaded files, the local copy is read and hashed. In both cases, if the hash doesn't match OneDrive's hash, the pipeline hard-stops: all in-flight downloads are cancelled and no corrupt file is kept. Remote files are never deleted unless the local copy has been verified on disk.
 
 If the OneDrive API omits the hash in folder listings (which happens occasionally), the app fetches it via a per-item API call before downloading.
 
 ### Resume
 
-Re-running the app after an interrupted session automatically picks up where you left off. Files that already exist locally with the correct size are skipped — they were hash-verified on the original download pass, so a size match is sufficient for resume.
+Re-running the app after an interrupted session automatically picks up where you left off. Files that already exist locally with the correct size are hash-verified against OneDrive's QuickXorHash instead of re-downloaded. If the hash matches, the metadata sidecar is refreshed and the remote is deleted (if deletion is enabled). If the hash doesn't match, the pipeline hard-stops just like a failed download.
 
 ## Architecture
 
