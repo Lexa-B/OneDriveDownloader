@@ -19,7 +19,7 @@ class QuickXorHash:
     __slots__ = ("_data", "_length_so_far", "_shift_so_far")
 
     def __init__(self) -> None:
-        self._data: list[int] = [0, 0, 0]  # 3 x 64-bit cells for 160 bits
+        self._data: list[int] = [0, 0, 0]  # 2 x 64-bit + 1 x 32-bit cell = 160 bits
         self._length_so_far: int = 0
         self._shift_so_far: int = 0
 
@@ -31,11 +31,16 @@ class QuickXorHash:
             index = current_shift >> 6  # // 64
             offset = current_shift & 63  # % 64
 
-            if offset <= 56:
+            # Last cell is only 32 bits wide (160 - 2*64 = 32)
+            is_last_cell = index == 2
+            cell_bits = 32 if is_last_cell else 64
+
+            if offset <= cell_bits - 8:
                 cells[index] = (cells[index] ^ (byte << offset)) & MASK_64
             else:
                 cells[index] = (cells[index] ^ (byte << offset)) & MASK_64
-                cells[(index + 1) % 3] ^= byte >> (64 - offset)
+                next_index = 0 if is_last_cell else (index + 1)
+                cells[next_index] ^= byte >> (cell_bits - offset)
 
             current_shift = (current_shift + SHIFT) % WIDTH_IN_BITS
 

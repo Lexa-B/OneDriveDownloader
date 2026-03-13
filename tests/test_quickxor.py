@@ -1,6 +1,32 @@
 import base64
 
+import pytest
+
 from src.quickxor import QuickXorHash
+
+# Reference values verified against the Microsoft C# reference implementation:
+# https://learn.microsoft.com/en-us/onedrive/developer/code-snippets/quickxorhash
+REFERENCE_VECTORS = [
+    (b"", "AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+    (b"\x01", "AQAAAAAAAAAAAAAAAQAAAAAAAAA="),
+    (b"hello", "aCgDG9jwBgAAAAAABQAAAAAAAAA="),
+    (b"The quick brown fox jumps over the lazy dog", "bMSlbysmxJL6S75XwfMcQZOpcr4="),
+    (bytes(range(256)), "QkGEfSisZcA7k+FCh71r2dbCayY="),
+    (b"A" * 160, "AAAAAAAAAAAAAAAAoAAAAAAAAAA="),
+    (b"test data for hashing", "VSSwXKsa3kKCgQ5hFYEZ3iAHEKA="),
+    (bytes(range(256)) * 100, "AAAAAAAAAAAAAAAAAGQAAAAAAAA="),
+]
+
+
+@pytest.mark.parametrize("data,expected", REFERENCE_VECTORS, ids=[
+    "empty", "single_byte", "hello", "pangram_43b", "bytes_0_255",
+    "160_As", "test_data", "large_25600b",
+])
+def test_reference_vectors(data, expected):
+    """Hash output matches the Microsoft C# reference implementation."""
+    h = QuickXorHash()
+    h.update(data)
+    assert h.base64_digest() == expected
 
 
 def test_empty_input():
@@ -16,9 +42,7 @@ def test_single_byte():
     h = QuickXorHash()
     h.update(b"\x01")
     result = h.base64_digest()
-    # Single byte 0x01 at shift 0, then XOR with length=1
-    assert isinstance(result, str)
-    assert len(base64.b64decode(result)) == 20
+    assert result == "AQAAAAAAAAAAAAAAAQAAAAAAAAA="
 
 
 def test_incremental_equals_single():
