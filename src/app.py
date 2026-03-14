@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -167,6 +169,33 @@ class OneDriveApp(App):
         panel = self.query_one(StatusPanel)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+        # Prevent system sleep during download
+        caffeine = None
+        if shutil.which("systemd-inhibit"):
+            try:
+                caffeine = subprocess.Popen(
+                    ["systemd-inhibit", "--what=idle:sleep",
+                     "--who=OneDrive Downloader", "--why=Downloading files",
+                     "sleep", "infinity"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except OSError:
+                pass
+
+        try:
+            await self._run_download_inner(folders, individual_files, delete_remote, panel)
+        finally:
+            if caffeine:
+                caffeine.terminate()
+                caffeine.wait()
+
+    async def _run_download_inner(
+        self,
+        folders: list[FolderNode],
+        individual_files: list[DriveItem],
+        delete_remote: bool,
+        panel: StatusPanel,
+    ) -> None:
         # Collect all files from selected folders recursively
         all_items: list[DriveItem] = []
         all_folder_ids: list[str] = []
