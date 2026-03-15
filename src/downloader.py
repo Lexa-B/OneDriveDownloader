@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from dataclasses import dataclass
@@ -112,30 +113,51 @@ async def download_file(
     hasher = QuickXorHash()
     temp_path = local_path.with_suffix(local_path.suffix + ".tmp")
 
-    try:
-        async with http_client.stream("GET", download_url) as response:
-            response.raise_for_status()
-            with open(temp_path, "wb") as f:
-                async for chunk in response.aiter_bytes(CHUNK_SIZE):
-                    f.write(chunk)
-                    hasher.update(chunk)
-                    if on_progress:
-                        on_progress(len(chunk))
+    max_retries = 5
+    last_error: Exception | None = None
 
-        computed_hash = hasher.base64_digest()
-        if computed_hash != item.quick_xor_hash:
+    for attempt in range(max_retries):
+        hasher = QuickXorHash()
+        try:
+            async with http_client.stream("GET", download_url) as response:
+                if response.status_code in (429, 503, 502, 504):
+                    retry_after = int(response.headers.get("Retry-After", 2 ** attempt))
+                    await asyncio.sleep(retry_after)
+                    continue
+                response.raise_for_status()
+                with open(temp_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(CHUNK_SIZE):
+                        f.write(chunk)
+                        hasher.update(chunk)
+                        if on_progress:
+                            on_progress(len(chunk))
+
+            computed_hash = hasher.base64_digest()
+            if computed_hash != item.quick_xor_hash:
+                temp_path.unlink(missing_ok=True)
+                return DownloadResult(
+                    item=item,
+                    status=DownloadStatus.HASH_MISMATCH,
+                    error=f"Expected {item.quick_xor_hash}, got {computed_hash}",
+                )
+
+            temp_path.rename(local_path)
+            set_file_timestamps(local_path, item)
+
+            return DownloadResult(item=item, status=DownloadStatus.SUCCESS)
+
+        except httpx.TransportError:
+            last_error = None
             temp_path.unlink(missing_ok=True)
-            return DownloadResult(
-                item=item,
-                status=DownloadStatus.HASH_MISMATCH,
-                error=f"Expected {item.quick_xor_hash}, got {computed_hash}",
-            )
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+        except Exception as e:
+            temp_path.unlink(missing_ok=True)
+            return DownloadResult(item=item, status=DownloadStatus.FAILED, error=str(e))
 
-        temp_path.rename(local_path)
-        set_file_timestamps(local_path, item)
-
-        return DownloadResult(item=item, status=DownloadStatus.SUCCESS)
-
-    except Exception as e:
-        temp_path.unlink(missing_ok=True)
-        return DownloadResult(item=item, status=DownloadStatus.FAILED, error=str(e))
+    temp_path.unlink(missing_ok=True)
+    return DownloadResult(
+        item=item, status=DownloadStatus.FAILED,
+        error=f"Failed after {max_retries} retries" + (f": {last_error}" if last_error else ""),
+    )

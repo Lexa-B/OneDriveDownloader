@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 from rich.text import Text
 from textual.binding import Binding
 from textual.widgets import Tree
@@ -84,7 +85,13 @@ class FolderTreeWidget(Tree[NodeData]):
             return
 
         node.remove_children()
-        items = await self.graph_client.list_children(folder.item_id)
+        try:
+            items = await self.graph_client.list_children(folder.item_id)
+        except httpx.HTTPStatusError as exc:
+            node.add_leaf(Text(f"⚠ Error: {exc.response.status_code} {exc.response.reason_phrase}", style="red"))
+            folder.loaded = True
+            return
+
         folders_first = sorted(items, key=lambda i: (not i.is_folder, i.name.lower()))
         for item in folders_first:
             if item.is_folder:

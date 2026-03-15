@@ -247,10 +247,10 @@ class OneDriveApp(App):
                     panel.bytes_done += item.size
                     return result
 
-                # Get download URL if we don't have one
-                if not item.download_url:
-                    fetched = await self.graph_client.get_item(item.id)
-                    item.download_url = fetched.download_url
+                # Always fetch a fresh download URL — cached ones from
+                # enumeration expire and cause 401 errors on large batches
+                fetched = await self.graph_client.get_item(item.id)
+                item.download_url = fetched.download_url
 
                 panel.file_started(item.id, item.name, item.size)
 
@@ -268,6 +268,9 @@ class OneDriveApp(App):
                     )
 
                 panel.file_finished(item.id)
+
+                if result.status == DownloadStatus.FAILED:
+                    log.error("Download failed: %s: %s", item.full_path, result.error)
 
                 if result.status == DownloadStatus.SUCCESS:
                     write_metadata_sidecar(item, OUTPUT_DIR)

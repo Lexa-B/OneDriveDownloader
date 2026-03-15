@@ -39,7 +39,13 @@ class GraphClient:
 
     async def _request(self, method: str, url: str, **kwargs) -> httpx.Response:
         for attempt in range(self._max_retries):
-            response = await self._client.request(method, url, **kwargs)
+            try:
+                response = await self._client.request(method, url, **kwargs)
+            except httpx.TransportError:
+                if attempt < self._max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise
             if response.status_code == 429:
                 retry_after = int(response.headers.get("Retry-After", 2 ** attempt))
                 await asyncio.sleep(retry_after)

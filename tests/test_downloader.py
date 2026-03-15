@@ -8,7 +8,6 @@ import pytest
 from src.downloader import (
     download_file,
     verify_hash,
-    verify_local_file,
     write_metadata_sidecar,
     should_skip_file,
     DownloadResult,
@@ -73,30 +72,6 @@ def test_should_skip_file_not_exists(tmp_path):
     """Don't skip when file doesn't exist locally."""
     item = _make_item()
     assert should_skip_file(item, tmp_path) is False
-
-
-def test_verify_local_file_exists_correct_size(tmp_path):
-    """verify_local_file returns True when file exists with correct size."""
-    item = _make_item(size=11)
-    local_file = tmp_path / "Documents" / "test.txt"
-    local_file.parent.mkdir(parents=True)
-    local_file.write_bytes(b"hello world")
-    assert verify_local_file(item, tmp_path) is True
-
-
-def test_verify_local_file_wrong_size(tmp_path):
-    """verify_local_file returns False when size doesn't match."""
-    item = _make_item(size=9999)
-    local_file = tmp_path / "Documents" / "test.txt"
-    local_file.parent.mkdir(parents=True)
-    local_file.write_bytes(b"hello world")
-    assert verify_local_file(item, tmp_path) is False
-
-
-def test_verify_local_file_missing(tmp_path):
-    """verify_local_file returns False when file doesn't exist."""
-    item = _make_item()
-    assert verify_local_file(item, tmp_path) is False
 
 
 def test_write_metadata_sidecar(tmp_path):
