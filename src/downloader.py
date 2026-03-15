@@ -146,8 +146,15 @@ async def download_file(
 
             return DownloadResult(item=item, status=DownloadStatus.SUCCESS)
 
-        except httpx.TransportError:
-            last_error = None
+        except httpx.HTTPStatusError as e:
+            temp_path.unlink(missing_ok=True)
+            if e.response.status_code in (429, 502, 503, 504) and attempt < max_retries - 1:
+                retry_after = int(e.response.headers.get("Retry-After", 2 ** attempt))
+                await asyncio.sleep(retry_after)
+                continue
+            return DownloadResult(item=item, status=DownloadStatus.FAILED, error=str(e))
+        except httpx.TransportError as e:
+            last_error = e
             temp_path.unlink(missing_ok=True)
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)

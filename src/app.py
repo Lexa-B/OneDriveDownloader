@@ -68,7 +68,7 @@ class ConfirmDialog(ModalScreen[bool]):
 
 class OneDriveApp(App):
     CSS_PATH = "app.tcss"
-    TITLE = "OneDrive Downloader"
+    TITLE = "\U0001f4c2 OneDrive Downloader"
 
     BINDINGS = [
         ("space", "toggle_selection", "Toggle"),
@@ -127,6 +127,11 @@ class OneDriveApp(App):
         panel.selected_count = len(folders) + len(files)
         panel.total_size = tree.get_total_selected_size()
 
+    def _update_download_title(self, panel: StatusPanel) -> None:
+        if panel.files_total > 0:
+            pct = panel.files_done * 100 // panel.files_total
+            self.title = f"\u2b07 {pct}% ({panel.files_done}/{panel.files_total}) \u2014 OneDrive Downloader"
+
     def action_toggle_delete(self) -> None:
         panel = self.query_one(StatusPanel)
         panel.delete_remote = not panel.delete_remote
@@ -150,7 +155,10 @@ class OneDriveApp(App):
                 if confirmed:
                     self._downloading = True
                     self._run_download(selected_folders, selected_files, True)
+                else:
+                    self.title = "\U0001f4c2 OneDrive Downloader"
 
+            self.title = "\u2753 Confirm \u2014 OneDrive Downloader"
             self.push_screen(
                 ConfirmDialog(
                     f"You are about to download {count} item(s) "
@@ -200,6 +208,7 @@ class OneDriveApp(App):
         all_items: list[DriveItem] = []
         all_folder_ids: list[str] = []
         panel.enum_status = "Enumerating files..."
+        self.title = "\U0001f50d Enumerating\u2026"
         await self._collect_files(folders, all_items, all_folder_ids, panel)
         panel.enum_status = ""
 
@@ -212,6 +221,7 @@ class OneDriveApp(App):
 
         panel.files_total = len(all_items)
         panel.bytes_total = sum(i.size for i in all_items)
+        self.title = f"\u2b07 0% (0/{panel.files_total}) \u2014 OneDrive Downloader"
 
         semaphore = asyncio.Semaphore(MAX_CONCURRENT)
         results: list[DownloadResult] = []
@@ -245,6 +255,7 @@ class OneDriveApp(App):
                                 self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
                     panel.files_done += 1
                     panel.bytes_done += item.size
+                    self._update_download_title(panel)
                     return result
 
                 # Always fetch a fresh download URL — cached ones from
@@ -254,7 +265,11 @@ class OneDriveApp(App):
 
                 panel.file_started(item.id, item.name, item.size)
 
+                progress_reported = 0
+
                 def on_progress(chunk_bytes: int) -> None:
+                    nonlocal progress_reported
+                    progress_reported += chunk_bytes
                     panel.bytes_done += chunk_bytes
                     panel.file_progress(item.id, chunk_bytes)
 
@@ -268,6 +283,13 @@ class OneDriveApp(App):
                     )
 
                 panel.file_finished(item.id)
+
+                # Correct for overcounting from retries — on_progress was
+                # called for chunks in failed attempts that were re-downloaded
+                if progress_reported > item.size:
+                    panel.bytes_done -= progress_reported - item.size
+                elif result.status == DownloadStatus.FAILED:
+                    panel.bytes_done -= progress_reported
 
                 if result.status == DownloadStatus.FAILED:
                     log.error("Download failed: %s: %s", item.full_path, result.error)
@@ -289,6 +311,7 @@ class OneDriveApp(App):
                             )
 
                 panel.files_done += 1
+                self._update_download_title(panel)
                 return result
 
         # Process files with concurrency
@@ -332,6 +355,13 @@ class OneDriveApp(App):
             self.notify(summary, timeout=15)
 
         self._downloading = False
+
+        if failed:
+            self.title = "\u274c Failed \u2014 OneDrive Downloader"
+        elif failed_results:
+            self.title = "\u26a0\ufe0f Done ({} failed) \u2014 OneDrive Downloader".format(len(failed_results))
+        else:
+            self.title = "\u2705 Done \u2014 OneDrive Downloader"
 
         tree = self.query_one(FolderTreeWidget)
         await tree.reload()

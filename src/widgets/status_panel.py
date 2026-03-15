@@ -134,12 +134,12 @@ class StatusPanel(Vertical):
             elif self.files_total > 0:
                 elapsed = time.monotonic() - self._download_start if self._download_start else 0.0
                 rate = self.bytes_done / elapsed if elapsed > 0.5 else 0.0
-                remaining = self.bytes_total - self.bytes_done
+                remaining = max(0, self.bytes_total - self.bytes_done)
                 eta = remaining / rate if rate > 0 else 0.0
-                pct = (self.bytes_done / self.bytes_total * 100) if self.bytes_total else 0.0
+                file_pct = (self.files_done / self.files_total * 100) if self.files_total else 0.0
 
                 lines = [
-                    f"{self.files_done} / {self.files_total} files  ({pct:.1f}%)",
+                    f"{self.files_done} / {self.files_total} files  ({file_pct:.1f}%)",
                     f"{_format_size(self.bytes_done, 3)} / {_format_size(self.bytes_total, 3)}",
                 ]
                 if rate > 0:

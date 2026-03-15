@@ -8,12 +8,13 @@ Built for one-time migrations off OneDrive — browse your folder tree, select w
 
 - **Interactive folder tree** — lazy-loaded from OneDrive, browse and select folders or individual files
 - **Checkbox selection** — toggle entire folders or pick specific files; partial-selection indicators for mixed states
-- **Chunked streaming downloads** — 4 MB chunks, up to 4 files in parallel
+- **Chunked streaming downloads** — 4 MB chunks, up to 4 files in parallel, with per-file progress bars
+- **Sleep inhibition** — prevents system sleep during downloads (via `systemd-inhibit` on Linux)
 - **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch. Already-downloaded files are re-verified by hash before any remote deletion
 - **Resume support** — re-running picks up where you left off; existing files are hash-verified locally instead of re-downloaded
 - **Metadata preservation** — restores `lastModifiedDateTime` as local file mtime; writes `.metadata.json` sidecars with full file metadata (IDs, timestamps, hashes)
 - **Remote deletion (on by default)** — deletes originals from OneDrive only after the local copy is verified on disk (exists + correct size + hash match); toggle off with `R` before downloading
-- **Rate limit handling** — automatic retry on HTTP 429 (respects Retry-After header, exponential fallback); automatic token refresh on 401
+- **Automatic retry** — retries on HTTP 429/502/503/504 and transport errors with exponential backoff (both for Graph API calls and file downloads); automatic token refresh on 401; download URLs are freshly fetched before each download to avoid expiration on large batches
 - **Directory structure preserved** — local `outputs/` mirrors your OneDrive folder hierarchy
 
 > **Warning:** Remote deletion is **enabled by default**. Press `R` to toggle it off before pressing `D` to download. When enabled, a confirmation prompt appears before any files are deleted.
@@ -133,7 +134,7 @@ For each file (up to 4 in parallel):
   ├─ Hash match → write metadata sidecar
   │   └─ (If deletion enabled) verify local file on disk, then delete remote
   ├─ Hash mismatch → HARD STOP all downloads
-  └─ Download failure → skip, don't delete remote
+  └─ Download failure → retry up to 5× on transient errors, then skip
         │
         ▼
 Reload folder tree from OneDrive
@@ -157,7 +158,7 @@ src/
 ├── app.tcss            Textual CSS layout (two-panel grid)
 ├── auth.py             MSAL device code flow, silent token refresh, config loading
 ├── downloader.py       Chunked streaming download, inline hash verification, metadata sidecars
-├── graph.py            Async Microsoft Graph API client with pagination, 429 backoff, 401 refresh
+├── graph.py            Async Microsoft Graph API client with pagination, retry (429/transport), 401 refresh
 ├── models.py           DriveItem (parsed API response) and FolderNode (tree selection state)
 ├── quickxor.py         QuickXorHash — port of Microsoft's C# reference implementation
 └── widgets/
@@ -184,6 +185,8 @@ src/
 | "PIPELINE STOPPED: HASH_MISMATCH" | Downloaded bytes don't match OneDrive's hash | This is a safety feature. Re-run the app — the file will be retried. If it persists, the file may be corrupted on OneDrive's side |
 | "PIPELINE STOPPED: MISSING_HASH" | OneDrive API returned no hash even after per-item fetch | Rare server-side issue. Wait and retry later |
 | Downloads seem slow / pausing | HTTP 429 rate limiting from Microsoft | The app retries automatically (respects the server's Retry-After header). Just wait — it will resume |
+| Many files fail with 401 Unauthorized | Download URLs expired during a large batch | Fixed — the app now fetches a fresh download URL immediately before each file download |
+| Files fail with 503 Service Unavailable | OneDrive server temporarily overloaded | The app retries up to 5 times with exponential backoff automatically |
 | `config.json not found` | Missing configuration file | Create `config.json` in the project root per the Installation section |
 
 ## Testing
