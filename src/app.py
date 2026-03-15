@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -82,6 +83,13 @@ class OneDriveApp(App):
         super().__init__()
         self.graph_client = graph_client
         self._downloading = False
+
+    def watch_title(self, title: str) -> None:
+        """Set the actual terminal tab title via OSC escape sequence."""
+        try:
+            os.write(sys.stderr.fileno(), f"\033]0;{title}\007".encode())
+        except OSError:
+            pass
 
     def notify(self, message, *, title="", severity="information", timeout=None):
         level = {"error": logging.ERROR, "warning": logging.WARNING}.get(

@@ -15,6 +15,7 @@ Built for one-time migrations off OneDrive — browse your folder tree, select w
 - **Metadata preservation** — restores `lastModifiedDateTime` as local file mtime; writes `.metadata.json` sidecars with full file metadata (IDs, timestamps, hashes)
 - **Remote deletion (on by default)** — deletes originals from OneDrive only after the local copy is verified on disk (exists + correct size + hash match); toggle off with `R` before downloading
 - **Automatic retry** — retries on HTTP 429/502/503/504 and transport errors with exponential backoff (both for Graph API calls and file downloads); automatic token refresh on 401; download URLs are freshly fetched before each download to avoid expiration on large batches
+- **Terminal tab status** — terminal tab title updates with current state: enumerating, download progress percentage, done/failed
 - **Directory structure preserved** — local `outputs/` mirrors your OneDrive folder hierarchy
 
 > **Warning:** Remote deletion is **enabled by default**. Press `R` to toggle it off before pressing `D` to download. When enabled, a confirmation prompt appears before any files are deleted.

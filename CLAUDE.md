@@ -19,8 +19,8 @@ One-time OneDrive downloader TUI. Python 3.14, uv, Textual.
 - `src/graph.py` — `GraphClient` wrapping httpx with pagination, 429/transport retry, and 401 token refresh
 - `src/downloader.py` — chunked streaming download with retry on transient errors, inline hash verification, metadata sidecars
 - `src/widgets/folder_tree.py` — Textual `Tree` subclass with lazy loading and checkbox selection
-- `src/widgets/status_panel.py` — reactive progress display
-- `src/app.py` — main Textual app wiring everything together
+- `src/widgets/status_panel.py` — reactive progress display with per-file progress bars
+- `src/app.py` — main Textual app wiring everything together; sets terminal tab title via OSC escape sequences
 
 ## Conventions
 
