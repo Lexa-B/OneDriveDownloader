@@ -42,6 +42,7 @@ CONFIG_PATH = PROJECT_ROOT / "config.json"
 CACHE_PATH = PROJECT_ROOT / ".msal_cache.json"
 LOG_PATH = PROJECT_ROOT / "onedrive_downloader.log"
 MAX_CONCURRENT = 4
+MAX_INFLIGHT_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB
 
 logging.basicConfig(
     filename=str(LOG_PATH),
@@ -246,10 +247,28 @@ class OneDriveApp(App):
         self.title = f"\u2b07 0% (0/{panel.files_total}) \u2014 OneDrive Downloader"
 
         semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+        inflight_bytes = 0
+        inflight_lock = asyncio.Lock()
+        inflight_changed = asyncio.Condition(inflight_lock)
         results: list[DownloadResult] = []
         failed = False
 
         async def download_one(item: DriveItem) -> DownloadResult:
+            nonlocal inflight_bytes
+            # Wait until adding this file stays under the size cap,
+            # OR nothing else is in flight (so a single huge file can proceed)
+            async with inflight_changed:
+                while inflight_bytes > 0 and inflight_bytes + item.size > MAX_INFLIGHT_BYTES:
+                    await inflight_changed.wait()
+                inflight_bytes += item.size
+            try:
+                return await _download_one_impl(item)
+            finally:
+                async with inflight_changed:
+                    inflight_bytes -= item.size
+                    inflight_changed.notify_all()
+
+        async def _download_one_impl(item: DriveItem) -> DownloadResult:
             async with semaphore:
                 # Ensure we have the hash — fetch per-item if needed
                 if item.quick_xor_hash is None:
