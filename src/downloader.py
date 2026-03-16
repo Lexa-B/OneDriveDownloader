@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -104,6 +104,7 @@ async def download_file(
     http_client: httpx.AsyncClient,
     on_progress: Callable[[int], None] | None = None,
     on_retry: Callable[[], None] | None = None,
+    on_refresh_url: Callable[[], Any] | None = None,  # async () -> str
 ) -> DownloadResult:
     if item.quick_xor_hash is None:
         return DownloadResult(item=item, status=DownloadStatus.MISSING_HASH)
@@ -123,6 +124,9 @@ async def download_file(
         hasher = QuickXorHash()
         try:
             async with http_client.stream("GET", download_url) as response:
+                if response.status_code == 401 and on_refresh_url and attempt < max_retries - 1:
+                    download_url = await on_refresh_url()
+                    continue
                 if response.status_code in (429, 503, 502, 504):
                     retry_after = int(response.headers.get("Retry-After", 2 ** attempt))
                     await asyncio.sleep(retry_after)
@@ -151,6 +155,9 @@ async def download_file(
 
         except httpx.HTTPStatusError as e:
             temp_path.unlink(missing_ok=True)
+            if e.response.status_code == 401 and on_refresh_url and attempt < max_retries - 1:
+                download_url = await on_refresh_url()
+                continue
             if e.response.status_code in (429, 502, 503, 504) and attempt < max_retries - 1:
                 retry_after = int(e.response.headers.get("Retry-After", 2 ** attempt))
                 await asyncio.sleep(retry_after)

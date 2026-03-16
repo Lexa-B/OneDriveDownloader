@@ -279,6 +279,10 @@ class OneDriveApp(App):
                 def on_retry() -> None:
                     panel.file_reset_progress(item.id)
 
+                async def on_refresh_url() -> str:
+                    fresh = await self.graph_client.get_item(item.id)
+                    return fresh.download_url
+
                 async with httpx.AsyncClient(timeout=300.0) as dl_client:
                     result = await download_file(
                         item=item,
@@ -287,6 +291,7 @@ class OneDriveApp(App):
                         http_client=dl_client,
                         on_progress=on_progress,
                         on_retry=on_retry,
+                        on_refresh_url=on_refresh_url,
                     )
 
                 panel.file_finished(item.id)
