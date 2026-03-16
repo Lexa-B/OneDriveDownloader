@@ -134,13 +134,29 @@ class FolderTreeWidget(Tree[NodeData]):
             # Also update file selections within this folder's subtree
             self._sync_file_selections(node)
             self._refresh_labels(node)
+            if not new_state:
+                self._break_ancestor_selection(node)
         elif isinstance(node.data, DriveItem):
             if node.data.id in self._selected_files:
                 del self._selected_files[node.data.id]
                 node.set_label(_file_label(node.data.name, node.data.size, selected=False))
+                self._break_ancestor_selection(node)
             else:
                 self._selected_files[node.data.id] = node.data
                 node.set_label(_file_label(node.data.name, node.data.size, selected=True))
+
+    def _break_ancestor_selection(self, node: TreeNode[NodeData]) -> None:
+        """Walk up from node clearing selected on ancestors.
+
+        When a child is deselected within a fully-selected parent, the
+        parent can no longer be fully selected.  Sibling folders and files
+        retain their individual selection state.
+        """
+        current = node.parent
+        while current and isinstance(current.data, FolderNode) and current.data.selected:
+            current.data.selected = False
+            current.set_label(_folder_label(current.data))
+            current = current.parent
 
     def _sync_file_selections(self, node: TreeNode[NodeData]) -> None:
         """Sync file selections when a folder is toggled."""
