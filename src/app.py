@@ -52,6 +52,20 @@ logging.basicConfig(
 log = logging.getLogger("onedrive_downloader")
 
 
+class ErrorDialog(ModalScreen[None]):
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        with Container(id="confirm-container"):
+            yield Static(self.message)
+            yield Button("OK", id="error-ok", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+
 class ConfirmDialog(ModalScreen[bool]):
     def __init__(self, message: str) -> None:
         super().__init__()
@@ -331,11 +345,13 @@ class OneDriveApp(App):
                 # Hard-fail: cancel all remaining tasks
                 for t in tasks:
                     t.cancel()
-                self.notify(
-                    f"PIPELINE STOPPED: {result.status.name} for {result.item.full_path}\n{result.error}",
-                    severity="error",
-                    timeout=30,
+                error_msg = (
+                    f"PIPELINE STOPPED: {result.status.name}\n\n"
+                    f"File: {result.item.full_path}\n"
+                    f"{result.error}"
                 )
+                log.error("%s", error_msg)
+                self.push_screen(ErrorDialog(error_msg))
                 failed = True
                 break
 
