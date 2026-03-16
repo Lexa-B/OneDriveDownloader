@@ -14,7 +14,7 @@ Built for one-time migrations off OneDrive — browse your folder tree, select w
 - **Resume support** — re-running picks up where you left off; existing files are hash-verified locally instead of re-downloaded
 - **Metadata preservation** — restores `lastModifiedDateTime` as local file mtime; writes `.metadata.json` sidecars with full file metadata (IDs, timestamps, hashes)
 - **Remote deletion (on by default)** — deletes originals from OneDrive only after the local copy is verified on disk (exists + correct size + hash match); toggle off with `R` before downloading
-- **Automatic retry** — retries on HTTP 429/502/503/504 and transport errors with exponential backoff (both for Graph API calls and file downloads); automatic token refresh on 401; download URLs are freshly fetched before each download to avoid expiration on large batches
+- **Automatic retry** — retries on HTTP 429/502/503/504 and transport errors with exponential backoff (both for Graph API calls and file downloads); automatic token refresh on 401; download URLs are freshly fetched before each download and refreshed mid-stream if they expire during large multi-hour transfers
 - **Terminal tab status** — terminal tab title updates with current state: enumerating, download progress percentage, done/failed
 - **Directory structure preserved** — local `outputs/` mirrors your OneDrive folder hierarchy
 
@@ -186,7 +186,7 @@ src/
 | "PIPELINE STOPPED: HASH_MISMATCH" | Downloaded bytes don't match OneDrive's hash | This is a safety feature. Re-run the app — the file will be retried. If it persists, the file may be corrupted on OneDrive's side |
 | "PIPELINE STOPPED: MISSING_HASH" | OneDrive API returned no hash even after per-item fetch | Rare server-side issue. Wait and retry later |
 | Downloads seem slow / pausing | HTTP 429 rate limiting from Microsoft | The app retries automatically (respects the server's Retry-After header). Just wait — it will resume |
-| Many files fail with 401 Unauthorized | Download URLs expired during a large batch | Fixed — the app now fetches a fresh download URL immediately before each file download |
+| Many files fail with 401 Unauthorized | Download URLs expired during a large batch | The app fetches a fresh download URL before each file and refreshes mid-stream if it expires during long transfers |
 | Files fail with 503 Service Unavailable | OneDrive server temporarily overloaded | The app retries up to 5 times with exponential backoff automatically |
 | `config.json not found` | Missing configuration file | Create `config.json` in the project root per the Installation section |
 
