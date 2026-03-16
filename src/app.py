@@ -273,13 +273,11 @@ class OneDriveApp(App):
 
                 panel.file_started(item.id, item.name, item.size)
 
-                progress_reported = 0
-
                 def on_progress(chunk_bytes: int) -> None:
-                    nonlocal progress_reported
-                    progress_reported += chunk_bytes
-                    panel.bytes_done += chunk_bytes
                     panel.file_progress(item.id, chunk_bytes)
+
+                def on_retry() -> None:
+                    panel.file_reset_progress(item.id)
 
                 async with httpx.AsyncClient(timeout=300.0) as dl_client:
                     result = await download_file(
@@ -288,16 +286,10 @@ class OneDriveApp(App):
                         output_dir=OUTPUT_DIR,
                         http_client=dl_client,
                         on_progress=on_progress,
+                        on_retry=on_retry,
                     )
 
                 panel.file_finished(item.id)
-
-                # Correct for overcounting from retries — on_progress was
-                # called for chunks in failed attempts that were re-downloaded
-                if progress_reported > item.size:
-                    panel.bytes_done -= progress_reported - item.size
-                elif result.status == DownloadStatus.FAILED:
-                    panel.bytes_done -= progress_reported
 
                 if result.status == DownloadStatus.FAILED:
                     log.error("Download failed: %s: %s", item.full_path, result.error)
@@ -319,6 +311,7 @@ class OneDriveApp(App):
                             )
 
                 panel.files_done += 1
+                panel.bytes_done += item.size
                 self._update_download_title(panel)
                 return result
 

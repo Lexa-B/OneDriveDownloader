@@ -103,6 +103,7 @@ async def download_file(
     output_dir: Path,
     http_client: httpx.AsyncClient,
     on_progress: Callable[[int], None] | None = None,
+    on_retry: Callable[[], None] | None = None,
 ) -> DownloadResult:
     if item.quick_xor_hash is None:
         return DownloadResult(item=item, status=DownloadStatus.MISSING_HASH)
@@ -117,6 +118,8 @@ async def download_file(
     last_error: Exception | None = None
 
     for attempt in range(max_retries):
+        if attempt > 0 and on_retry:
+            on_retry()
         hasher = QuickXorHash()
         try:
             async with http_client.stream("GET", download_url) as response:

@@ -105,6 +105,12 @@ class StatusPanel(Vertical):
             self._active_files[item_id] = (name, done + chunk_bytes, total)
             self._update_display()
 
+    def file_reset_progress(self, item_id: str) -> None:
+        """Reset per-file progress to 0 (used on download retry)."""
+        if item_id in self._active_files:
+            name, _, total = self._active_files[item_id]
+            self._active_files[item_id] = (name, 0, total)
+
     def file_finished(self, item_id: str) -> None:
         self._active_files.pop(item_id, None)
         self._update_display()
@@ -132,15 +138,19 @@ class StatusPanel(Vertical):
             if self.enum_status:
                 self.query_one("#overall-progress", Static).update(self.enum_status)
             elif self.files_total > 0:
+                # bytes_done = completed files only; add in-flight progress for display
+                inflight = sum(done for _, done, _ in self._active_files.values())
+                effective_bytes = self.bytes_done + inflight
+
                 elapsed = time.monotonic() - self._download_start if self._download_start else 0.0
-                rate = self.bytes_done / elapsed if elapsed > 0.5 else 0.0
-                remaining = max(0, self.bytes_total - self.bytes_done)
+                rate = effective_bytes / elapsed if elapsed > 0.5 else 0.0
+                remaining = max(0, self.bytes_total - effective_bytes)
                 eta = remaining / rate if rate > 0 else 0.0
                 file_pct = (self.files_done / self.files_total * 100) if self.files_total else 0.0
 
                 lines = [
                     f"{self.files_done} / {self.files_total} files  ({file_pct:.1f}%)",
-                    f"{_format_size(self.bytes_done, 3)} / {_format_size(self.bytes_total, 3)}",
+                    f"{_format_size(effective_bytes, 3)} / {_format_size(self.bytes_total, 3)}",
                 ]
                 if rate > 0:
                     lines.append(f"{_format_rate(rate)}  —  ETA {_format_eta(eta)}")
