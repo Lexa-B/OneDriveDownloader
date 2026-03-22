@@ -53,18 +53,25 @@ logging.basicConfig(
 log = logging.getLogger("onedrive_downloader")
 
 
-class ErrorDialog(ModalScreen[None]):
-    def __init__(self, message: str) -> None:
+class ErrorDialog(ModalScreen[bool]):
+    """Modal for pipeline errors. Returns True to stop, False to skip."""
+
+    def __init__(self, message: str, *, allow_skip: bool = False) -> None:
         super().__init__()
         self.message = message
+        self._allow_skip = allow_skip
 
     def compose(self) -> ComposeResult:
         with Container(id="confirm-container"):
             yield Static(self.message)
-            yield Button("OK", id="error-ok", variant="error")
+            if self._allow_skip:
+                yield Button("Skip file — continue downloading", id="error-skip", variant="warning")
+                yield Button("Stop — cancel all downloads", id="error-stop", variant="error")
+            else:
+                yield Button("OK", id="error-stop", variant="error")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(None)
+        self.dismiss(event.button.id == "error-stop")
 
 
 class ConfirmDialog(ModalScreen[bool]):
@@ -360,7 +367,7 @@ class OneDriveApp(App):
             result = await coro
             results.append(result)
 
-            if result.status in (DownloadStatus.MISSING_HASH, DownloadStatus.HASH_MISMATCH):
+            if result.status == DownloadStatus.HASH_MISMATCH:
                 # Hard-fail: cancel all remaining tasks
                 for t in tasks:
                     t.cancel()
@@ -373,6 +380,23 @@ class OneDriveApp(App):
                 self.push_screen(ErrorDialog(error_msg))
                 failed = True
                 break
+
+            if result.status == DownloadStatus.MISSING_HASH:
+                error_msg = (
+                    f"No hash available\n\n"
+                    f"File: {result.item.full_path}\n\n"
+                    f"This file type (e.g. OneNote) may not support hash verification.\n"
+                    f"Skip this file or stop all downloads?"
+                )
+                log.warning("%s", error_msg)
+                should_stop = await self.push_screen_wait(
+                    ErrorDialog(error_msg, allow_skip=True)
+                )
+                if should_stop:
+                    for t in tasks:
+                        t.cancel()
+                    failed = True
+                    break
 
         succeeded = sum(1 for r in results if r.status == DownloadStatus.SUCCESS)
         skipped = sum(1 for r in results if r.status == DownloadStatus.SKIPPED)
