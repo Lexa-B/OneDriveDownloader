@@ -46,6 +46,9 @@ def _progress_bar(done: int, total: int, width: int = 20) -> str:
     return f"[{'━' * filled}{'─' * (width - filled)}] {ratio * 100:.0f}%"
 
 
+BRAILLE_SPINNER = ["⢎⡰", "⢎⡡", "⢎⡑", "⢎⠱", "⠎⡱", "⢊⡱", "⢌⡱", "⢆⡱"]
+
+
 class StatusPanel(Vertical):
     selected_count: reactive[int] = reactive(0)
     total_size: reactive[int] = reactive(0)
@@ -57,7 +60,9 @@ class StatusPanel(Vertical):
     enum_status: reactive[str] = reactive("")
     _download_start: float = 0.0
     _last_progress_update: float = 0.0
+    _spinner_frame: int = 0
     # Per-file progress: {item_id: (filename, bytes_done, bytes_total)}
+    # total == -1 means "verifying" mode (spinner instead of progress bar)
     _active_files: dict[str, tuple[str, int, int]] = {}
 
     def compose(self):
@@ -70,7 +75,15 @@ class StatusPanel(Vertical):
     def on_mount(self) -> None:
         self._active_files = {}
         self._last_progress_update = 0.0
+        self._spinner_frame = 0
+        self.set_interval(0.1, self._tick_spinner)
         self._update_display()
+
+    def _tick_spinner(self) -> None:
+        # Only update if there's a verifying file
+        if any(total == -1 for _, _, total in self._active_files.values()):
+            self._spinner_frame = (self._spinner_frame + 1) % len(BRAILLE_SPINNER)
+            self._update_display()
 
     def watch_selected_count(self) -> None:
         self._update_display()
@@ -98,6 +111,11 @@ class StatusPanel(Vertical):
             self._download_start = time.monotonic()
         elif self.files_total == 0:
             self._download_start = 0.0
+        self._update_display()
+
+    def file_verifying(self, item_id: str, name: str) -> None:
+        """Show a spinner for a file being hash-verified."""
+        self._active_files[item_id] = (name, 0, -1)
         self._update_display()
 
     def file_started(self, item_id: str, name: str, size: int) -> None:
@@ -138,8 +156,12 @@ class StatusPanel(Vertical):
             if self._active_files:
                 lines = []
                 for name, done, total in self._active_files.values():
-                    bar = _progress_bar(done, total)
-                    lines.append(f"{name}\n  {_format_size(done)} / {_format_size(total)}  {bar}")
+                    if total == -1:
+                        spinner = BRAILLE_SPINNER[self._spinner_frame]
+                        lines.append(f"{name}\n  Verifying {spinner}")
+                    else:
+                        bar = _progress_bar(done, total)
+                        lines.append(f"{name}\n  {_format_size(done)} / {_format_size(total)}  {bar}")
                 self.query_one("#active-downloads", Static).update("\n".join(lines))
             else:
                 self.query_one("#active-downloads", Static).update("")
