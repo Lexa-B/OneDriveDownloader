@@ -476,8 +476,10 @@ class OneDriveApp(App):
         skipped = sum(1 for r in results if r.status == DownloadStatus.SKIPPED)
         failed_results = [r for r in results if r.status == DownloadStatus.FAILED]
 
+        skipped_hashes = [r for r in results if r.status == DownloadStatus.MISSING_HASH]
+
         # Delete remote folders bottom-up, but only if every file succeeded
-        if not failed and delete_remote and not failed_results:
+        if not failed and delete_remote and not failed_results and not skipped_hashes:
             for folder_id in reversed(all_folder_ids):
                 try:
                     await self.graph_client.delete_item(folder_id)
