@@ -25,6 +25,7 @@ from src.downloader import (
     DownloadResult,
     DownloadStatus,
     download_file,
+    init_hash_pool,
     should_skip_file,
     verify_local_file,
     write_metadata_sidecar,
@@ -555,6 +556,9 @@ def main() -> None:
     token_provider = TokenProvider(msal_app, CACHE_PATH)
 
     graph = GraphClient(access_token=token, token_provider=token_provider)
+
+    # Spawn hash worker processes before Textual takes over the terminal
+    init_hash_pool()
 
     app = OneDriveApp(graph_client=graph)
     app.run()

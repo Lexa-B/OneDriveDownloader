@@ -25,11 +25,18 @@ CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB
 _HASH_WORKERS: ProcessPoolExecutor | None = None
 
 
-def _get_hash_pool() -> ProcessPoolExecutor:
+def init_hash_pool() -> None:
+    """Initialize the hash worker pool. Must be called before Textual starts."""
     global _HASH_WORKERS
     if _HASH_WORKERS is None:
-        ctx = multiprocessing.get_context("spawn")
-        _HASH_WORKERS = ProcessPoolExecutor(mp_context=ctx)
+        _HASH_WORKERS = ProcessPoolExecutor()
+        # Force workers to spawn now while FDs are clean
+        _HASH_WORKERS.submit(int).result()
+
+
+def _get_hash_pool() -> ProcessPoolExecutor:
+    if _HASH_WORKERS is None:
+        raise RuntimeError("Hash pool not initialized — call init_hash_pool() before starting the app")
     return _HASH_WORKERS
 
 
