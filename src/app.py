@@ -382,10 +382,20 @@ class OneDriveApp(App):
                 break
 
             if result.status == DownloadStatus.MISSING_HASH:
+                if result.item.name.endswith(".one"):
+                    reason = (
+                        "OneNote files are stored as special containers "
+                        "and do not have a hash in the OneDrive API."
+                    )
+                else:
+                    reason = (
+                        "The OneDrive API did not return a hash for this file, "
+                        "so it cannot be verified after download."
+                    )
                 error_msg = (
                     f"No hash available\n\n"
                     f"File: {result.item.full_path}\n\n"
-                    f"This file type (e.g. OneNote) may not support hash verification.\n"
+                    f"{reason}\n"
                     f"Skip this file or stop all downloads?"
                 )
                 log.warning("%s", error_msg)
