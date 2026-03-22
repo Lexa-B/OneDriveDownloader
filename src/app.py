@@ -513,16 +513,16 @@ class OneDriveApp(App):
                     except Exception as e:
                         self.notify(f"Delete folder failed: {e}", severity="warning")
                     return
-                # Not empty — recurse into subfolders we know about
+                # Has children — only recurse into subfolders we enumerated,
+                # leave unknown items untouched
+                has_unknown = False
                 for item in children:
                     if item.is_folder and item.id in enumerated:
                         await _delete_folder_tree(item.id)
-                # Check again after cleaning children
-                try:
-                    remaining = await self.graph_client.list_children(folder_id)
-                except Exception:
-                    return
-                if not remaining:
+                    else:
+                        has_unknown = True
+                if not has_unknown:
+                    # Everything inside was ours — safe to delete parent
                     try:
                         await self.graph_client.delete_item(folder_id)
                     except Exception as e:
