@@ -298,8 +298,9 @@ class OneDriveApp(App):
                     )
 
                 # If local file already exists, verify size + hash instead of re-downloading
+                # Run in thread to avoid blocking the event loop on large files
                 if should_skip_file(item, OUTPUT_DIR):
-                    result = verify_local_file(item, OUTPUT_DIR)
+                    result = await asyncio.to_thread(verify_local_file, item, OUTPUT_DIR)
                     if result.status == DownloadStatus.SKIPPED:
                         # Verified — refresh metadata and delete remote if enabled
                         write_metadata_sidecar(item, OUTPUT_DIR)
