@@ -80,6 +80,9 @@ class StatusPanel(Vertical):
         self._update_display()
 
     def watch_files_done(self) -> None:
+        # Reset download timer when files_done resets to 0 (new download)
+        if self.files_done == 0:
+            self._download_start = 0.0
         self._update_display()
 
     def watch_bytes_done(self) -> None:

@@ -254,6 +254,8 @@ class OneDriveApp(App):
                 all_items.append(f)
                 seen_ids.add(f.id)
 
+        panel.files_done = 0
+        panel.bytes_done = 0
         panel.files_total = len(all_items)
         panel.bytes_total = sum(i.size for i in all_items)
         self.title = f"\u2b07 0% (0/{panel.files_total}) \u2014 OneDrive Downloader"
