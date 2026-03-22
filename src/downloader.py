@@ -188,13 +188,27 @@ async def download_file(
 
     max_retries = 5
     last_error: Exception | None = None
+    resume_offset = 0  # bytes already written to temp_path
 
     for attempt in range(max_retries):
         if attempt > 0 and on_retry:
             on_retry()
+
+        # On resume, rebuild hash state from existing .tmp data
         hasher = QuickXorHash()
+        if resume_offset > 0 and temp_path.exists():
+            with open(temp_path, "rb") as rf:
+                while chunk := rf.read(CHUNK_SIZE):
+                    hasher.update(chunk)
+            if on_progress:
+                on_progress(resume_offset)
+
         try:
-            async with http_client.stream("GET", download_url) as response:
+            headers = {}
+            if resume_offset > 0:
+                headers["Range"] = f"bytes={resume_offset}-"
+
+            async with http_client.stream("GET", download_url, headers=headers) as response:
                 if response.status_code == 401 and on_refresh_url and attempt < max_retries - 1:
                     download_url = await on_refresh_url()
                     continue
@@ -203,7 +217,15 @@ async def download_file(
                     await asyncio.sleep(retry_after)
                     continue
                 response.raise_for_status()
-                with open(temp_path, "wb") as f:
+
+                # 206 = partial content (resume), 200 = full (server ignored Range)
+                if response.status_code == 200 and resume_offset > 0:
+                    # Server sent full file — start over
+                    resume_offset = 0
+                    hasher = QuickXorHash()
+
+                mode = "ab" if resume_offset > 0 else "wb"
+                with open(temp_path, mode) as f:
                     async for chunk in response.aiter_bytes(CHUNK_SIZE):
                         f.write(chunk)
                         hasher.update(chunk)
@@ -213,6 +235,7 @@ async def download_file(
             computed_hash = hasher.base64_digest()
             if computed_hash != item.quick_xor_hash:
                 temp_path.unlink(missing_ok=True)
+                resume_offset = 0
                 return DownloadResult(
                     item=item,
                     status=DownloadStatus.HASH_MISMATCH,
@@ -225,18 +248,21 @@ async def download_file(
             return DownloadResult(item=item, status=DownloadStatus.SUCCESS)
 
         except httpx.HTTPStatusError as e:
-            temp_path.unlink(missing_ok=True)
             if e.response.status_code == 401 and on_refresh_url and attempt < max_retries - 1:
+                # Keep .tmp for resume — just need a fresh URL
+                resume_offset = temp_path.stat().st_size if temp_path.exists() else 0
                 download_url = await on_refresh_url()
                 continue
             if e.response.status_code in (429, 502, 503, 504) and attempt < max_retries - 1:
+                resume_offset = temp_path.stat().st_size if temp_path.exists() else 0
                 retry_after = int(e.response.headers.get("Retry-After", 2 ** attempt))
                 await asyncio.sleep(retry_after)
                 continue
+            temp_path.unlink(missing_ok=True)
             return DownloadResult(item=item, status=DownloadStatus.FAILED, error=str(e))
         except httpx.TransportError as e:
             last_error = e
-            temp_path.unlink(missing_ok=True)
+            resume_offset = temp_path.stat().st_size if temp_path.exists() else 0
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue
