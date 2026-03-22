@@ -10,7 +10,7 @@ Built for one-time migrations off OneDrive — browse your folder tree, select w
 - **Checkbox selection** — toggle entire folders or pick specific files; partial-selection indicators for mixed states
 - **Chunked streaming downloads** — 4 MB chunks, up to 4 files in parallel (capped at 1 GB total in-flight), with per-file progress bars
 - **Sleep inhibition** — prevents system sleep during downloads (via `systemd-inhibit` on Linux)
-- **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch. Files without a hash (e.g. OneNote `.one` files) prompt the user to download without verification, skip, or stop. Already-downloaded files are re-verified by hash before any remote deletion
+- **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch. Files without a hash (e.g. OneNote `.one` files) prompt the user to download without verification, skip, or stop. Already-downloaded files are re-verified by hash before any remote deletion. Verification uses all CPU cores via multiprocessing and runs in parallel with ongoing downloads
 - **Resume support** — re-running picks up where you left off; existing files are hash-verified locally instead of re-downloaded
 - **Metadata preservation** — restores `lastModifiedDateTime` as local file mtime; writes `.metadata.json` sidecars with full file metadata (IDs, timestamps, hashes)
 - **Remote deletion (on by default)** — deletes originals from OneDrive only after the local copy is verified on disk (exists + correct size + hash match); toggle off with `R` before downloading
@@ -144,7 +144,7 @@ Reload folder tree from OneDrive
 
 ### Hash verification
 
-OneDrive Personal uses [QuickXorHash](https://learn.microsoft.com/en-us/onedrive/developer/code-snippets/quickxorhash), a proprietary Microsoft hash algorithm. For fresh downloads, the hash is computed inline while streaming each chunk. For already-downloaded files, the local copy is read and hashed. In both cases, if the hash doesn't match OneDrive's hash, the pipeline hard-stops: all in-flight downloads are cancelled and no corrupt file is kept. Remote files are never deleted unless the local copy has been verified on disk.
+OneDrive Personal uses [QuickXorHash](https://learn.microsoft.com/en-us/onedrive/developer/code-snippets/quickxorhash), a proprietary Microsoft hash algorithm. For fresh downloads, the hash is computed inline while streaming each chunk. For already-downloaded files, the local copy is hash-verified using all CPU cores (the file is split into chunks that are hashed in parallel via `ProcessPoolExecutor`, then XOR-combined). Verification runs concurrently with ongoing downloads — it doesn't block the pipeline. In both cases, if the hash doesn't match OneDrive's hash, the pipeline hard-stops: all in-flight downloads are cancelled and no corrupt file is kept. Remote files are never deleted unless the local copy has been verified on disk.
 
 If the OneDrive API omits the hash in folder listings (which happens occasionally), the app fetches it via a per-item API call before downloading. Some file types (notably OneNote `.one` files) never have a hash — for these, a dialog lets you choose to download without verification, skip, or stop.
 
