@@ -103,7 +103,7 @@ class OneDriveApp(App):
         ("enter", "expand_collapse", "Expand"),
         ("d", "start_download", "Download"),
         ("r", "toggle_delete", "Del toggle"),
-        ("q", "quit", "Quit"),
+        ("ctrl+c", "quit", "Quit"),
     ]
 
     def __init__(self, graph_client: GraphClient) -> None:
@@ -135,7 +135,7 @@ class OneDriveApp(App):
         yield FolderTreeWidget(self.graph_client)
         yield StatusPanel()
         yield Static(
-            "[Space] Toggle  [Enter] Expand  [D] Download  [R] Del toggle  [Q] Quit",
+            "[Space] Toggle  [Enter] Expand  [D] Download  [R] Del toggle  [Ctrl+C] Quit",
             id="footer-bar",
         )
 
