@@ -1,13 +1,29 @@
 [project]
 name = "onedrivedownloader"
-version = "0.0.0"
-description = "One-time OneDrive downloader with TUI"
+version = "1.0.0"
+description = "Terminal UI for bulk-downloading files from OneDrive Personal with hash verification, metadata preservation, and optional remote deletion"
 license = {text = "MIT"}
 authors = [
     {name = "Lexa Baldwin", email = "Lexa.40@proton.me"},
 ]
 readme = "README.md"
 requires-python = ">=3.14"
+keywords = ["onedrive", "download", "backup", "migration", "tui", "textual"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Archiving :: Backup",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/Lexa-B/OneDriveDownloader"
+Repository = "https://github.com/Lexa-B/OneDriveDownloader"
+Issues = "https://github.com/Lexa-B/OneDriveDownloader/issues"
 dependencies = [
     "msal>=1.31.0",
     "httpx>=0.28.0",
