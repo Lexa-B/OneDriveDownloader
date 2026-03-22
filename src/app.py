@@ -257,6 +257,7 @@ class OneDriveApp(App):
 
         panel.files_done = 0
         panel.bytes_done = 0
+        panel.bytes_downloaded = 0
         panel.files_total = len(all_items)
         panel.bytes_total = sum(i.size for i in all_items)
         self.title = f"\u2b07 0% (0/{panel.files_total}) \u2014 OneDrive Downloader"
@@ -319,6 +320,7 @@ class OneDriveApp(App):
                             self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
                 panel.files_done += 1
                 panel.bytes_done += item.size
+                # Don't add to bytes_downloaded — this was a verified skip, not a download
                 self._update_download_title(panel)
                 return result
 
@@ -374,6 +376,7 @@ class OneDriveApp(App):
 
                 panel.files_done += 1
                 panel.bytes_done += item.size
+                panel.bytes_downloaded += item.size
                 self._update_download_title(panel)
                 return result
 
@@ -418,6 +421,7 @@ class OneDriveApp(App):
                                 self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
                         pnl.files_done += 1
                         pnl.bytes_done += item.size
+                        pnl.bytes_downloaded += item.size
                         self._update_download_title(pnl)
                         return DownloadResult(item=item, status=DownloadStatus.SUCCESS)
                     except Exception as e:

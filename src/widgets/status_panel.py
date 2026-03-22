@@ -56,6 +56,7 @@ class StatusPanel(Vertical):
     files_done: reactive[int] = reactive(0)
     files_total: reactive[int] = reactive(0)
     bytes_done: reactive[int] = reactive(0)
+    bytes_downloaded: reactive[int] = reactive(0)  # only actual downloads, not verified skips
     bytes_total: reactive[int] = reactive(0)
     enum_status: reactive[str] = reactive("")
     _download_start: float = 0.0
@@ -169,12 +170,16 @@ class StatusPanel(Vertical):
             if self.enum_status:
                 self.query_one("#overall-progress", Static).update(self.enum_status)
             elif self.files_total > 0:
-                # bytes_done = completed files only; add in-flight progress for display
-                inflight = sum(done for _, done, _ in self._active_files.values())
+                # bytes_done = all completed files; add in-flight progress for display
+                inflight = sum(done for _, done, _ in self._active_files.values()
+                               if done >= 0)  # skip verifying entries (total == -1)
                 effective_bytes = self.bytes_done + inflight
 
+                # Rate/ETA based on actual downloads only (excludes verified skips)
+                dl_inflight = sum(done for _, done, total in self._active_files.values()
+                                  if total >= 0)
                 elapsed = time.monotonic() - self._download_start if self._download_start else 0.0
-                rate = effective_bytes / elapsed if elapsed > 0.5 else 0.0
+                rate = (self.bytes_downloaded + dl_inflight) / elapsed if elapsed > 0.5 else 0.0
                 remaining = max(0, self.bytes_total - effective_bytes)
                 eta = remaining / rate if rate > 0 else 0.0
                 file_pct = (self.files_done / self.files_total * 100) if self.files_total else 0.0
