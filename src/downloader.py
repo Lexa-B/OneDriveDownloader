@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import multiprocessing
 import os
 import struct
 from concurrent.futures import ProcessPoolExecutor
@@ -27,7 +28,8 @@ _HASH_WORKERS: ProcessPoolExecutor | None = None
 def _get_hash_pool() -> ProcessPoolExecutor:
     global _HASH_WORKERS
     if _HASH_WORKERS is None:
-        _HASH_WORKERS = ProcessPoolExecutor()
+        ctx = multiprocessing.get_context("spawn")
+        _HASH_WORKERS = ProcessPoolExecutor(mp_context=ctx)
     return _HASH_WORKERS
 
 
