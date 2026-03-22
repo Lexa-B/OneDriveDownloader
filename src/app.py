@@ -518,7 +518,7 @@ class OneDriveApp(App):
 
             # Top-down deletion: if a folder is clean, one recursive DELETE
             # covers its entire subtree. If tainted, try its clean children.
-            panel.file_verifying("_deleting", "Deleting remote folders")
+            panel.file_verifying("_deleting", "Cleaning up", label="Deleting remote folders")
 
             async def _delete_clean(folder_id: str) -> None:
                 if folder_id not in tainted:

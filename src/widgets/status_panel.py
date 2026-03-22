@@ -63,8 +63,9 @@ class StatusPanel(Vertical):
     _last_progress_update: float = 0.0
     _spinner_frame: int = 0
     # Per-file progress: {item_id: (filename, bytes_done, bytes_total)}
-    # total == -1 means "verifying" mode (spinner instead of progress bar)
+    # total == -1 means spinner mode
     _active_files: dict[str, tuple[str, int, int]] = {}
+    _spinner_labels: dict[str, str] = {}
 
     def compose(self):
         yield Static(id="selected-info")
@@ -75,6 +76,7 @@ class StatusPanel(Vertical):
 
     def on_mount(self) -> None:
         self._active_files = {}
+        self._spinner_labels = {}
         self._last_progress_update = 0.0
         self._spinner_frame = 0
         self.set_interval(0.1, self._tick_spinner)
@@ -114,9 +116,10 @@ class StatusPanel(Vertical):
             self._download_start = 0.0
         self._update_display()
 
-    def file_verifying(self, item_id: str, name: str) -> None:
-        """Show a spinner for a file being hash-verified."""
+    def file_verifying(self, item_id: str, name: str, label: str = "Verifying") -> None:
+        """Show a spinner with a label."""
         self._active_files[item_id] = (name, 0, -1)
+        self._spinner_labels[item_id] = label
         self._update_display()
 
     def file_started(self, item_id: str, name: str, size: int) -> None:
@@ -141,6 +144,7 @@ class StatusPanel(Vertical):
 
     def file_finished(self, item_id: str) -> None:
         self._active_files.pop(item_id, None)
+        self._spinner_labels.pop(item_id, None)
         self._update_display()
 
     def _update_display(self) -> None:
@@ -156,10 +160,11 @@ class StatusPanel(Vertical):
             # Active downloads with per-file progress bars
             if self._active_files:
                 lines = []
-                for name, done, total in self._active_files.values():
+                for item_id, (name, done, total) in self._active_files.items():
                     if total == -1:
                         spinner = BRAILLE_SPINNER[self._spinner_frame]
-                        lines.append(f"{name}\n  Verifying {spinner}")
+                        label = self._spinner_labels.get(item_id, "Working")
+                        lines.append(f"{name}\n  {label} {spinner}")
                     else:
                         bar = _progress_bar(done, total)
                         lines.append(f"{name}\n  {_format_size(done)} / {_format_size(total)}  {bar}")
