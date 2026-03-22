@@ -494,13 +494,45 @@ class OneDriveApp(App):
 
         skipped_hashes = [r for r in results if r.status == DownloadStatus.MISSING_HASH]
 
-        # Delete remote folders bottom-up, but only if every file succeeded
+        # Delete remote folders top-down: check each is empty before deleting.
+        # If a parent is empty, one delete covers the whole subtree.
+        # If not, step into children and try those instead.
         if not failed and delete_remote and not failed_results and not skipped_hashes:
-            for folder_id in reversed(all_folder_ids):
+            # Build set of folder IDs we enumerated for quick lookup
+            enumerated = set(all_folder_ids)
+
+            async def _delete_folder_tree(folder_id: str) -> None:
                 try:
-                    await self.graph_client.delete_item(folder_id)
-                except Exception as e:
-                    self.notify(f"Delete folder failed: {e}", severity="warning")
+                    children = await self.graph_client.list_children(folder_id)
+                except Exception:
+                    return  # folder may already be gone
+                if not children:
+                    # Empty — safe to delete
+                    try:
+                        await self.graph_client.delete_item(folder_id)
+                    except Exception as e:
+                        self.notify(f"Delete folder failed: {e}", severity="warning")
+                    return
+                # Not empty — recurse into subfolders we know about
+                for item in children:
+                    if item.is_folder and item.id in enumerated:
+                        await _delete_folder_tree(item.id)
+                # Check again after cleaning children
+                try:
+                    remaining = await self.graph_client.list_children(folder_id)
+                except Exception:
+                    return
+                if not remaining:
+                    try:
+                        await self.graph_client.delete_item(folder_id)
+                    except Exception as e:
+                        self.notify(f"Delete folder failed: {e}", severity="warning")
+
+            # Start from top-level selected folders (last entries in depth-first list)
+            top_level = {f.item_id for f in folders}
+            for folder_id in reversed(all_folder_ids):
+                if folder_id in top_level:
+                    await _delete_folder_tree(folder_id)
 
         if not failed:
             summary = f"Done! {succeeded} downloaded, {skipped} skipped, {len(failed_results)} failed"
