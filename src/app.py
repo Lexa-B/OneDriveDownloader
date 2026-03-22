@@ -53,25 +53,30 @@ logging.basicConfig(
 log = logging.getLogger("onedrive_downloader")
 
 
-class ErrorDialog(ModalScreen[bool]):
-    """Modal for pipeline errors. Returns True to stop, False to skip."""
+class ErrorDialog(ModalScreen[str]):
+    """Modal for pipeline errors. Returns 'stop', 'skip', or 'download'."""
 
-    def __init__(self, message: str, *, allow_skip: bool = False) -> None:
+    def __init__(self, message: str, *, allow_skip: bool = False, allow_download: bool = False) -> None:
         super().__init__()
         self.message = message
         self._allow_skip = allow_skip
+        self._allow_download = allow_download
 
     def compose(self) -> ComposeResult:
         with Container(id="confirm-container"):
             yield Static(self.message)
+            if self._allow_download:
+                yield Button("Download without verification", id="error-download", variant="success")
             if self._allow_skip:
                 yield Button("Skip file — continue downloading", id="error-skip", variant="warning")
+            if self._allow_skip or self._allow_download:
                 yield Button("Stop — cancel all downloads", id="error-stop", variant="error")
             else:
                 yield Button("OK", id="error-stop", variant="error")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "error-stop")
+        action = event.button.id.removeprefix("error-")
+        self.dismiss(action)
 
 
 class ConfirmDialog(ModalScreen[bool]):
@@ -360,6 +365,61 @@ class OneDriveApp(App):
                 self._update_download_title(panel)
                 return result
 
+        async def _download_no_hash(item: DriveItem, del_remote: bool, pnl: StatusPanel) -> DownloadResult:
+            """Download a file without hash verification."""
+            fetched = await self.graph_client.get_item(item.id)
+            item.download_url = fetched.download_url
+            pnl.file_started(item.id, item.name, item.size)
+
+            async def on_refresh() -> str:
+                fresh = await self.graph_client.get_item(item.id)
+                return fresh.download_url
+
+            async with httpx.AsyncClient(timeout=300.0) as dl_client:
+                local_path = OUTPUT_DIR / item.full_path
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = local_path.with_suffix(local_path.suffix + ".tmp")
+                max_retries = 5
+                for attempt in range(max_retries):
+                    try:
+                        async with dl_client.stream("GET", item.download_url) as response:
+                            if response.status_code == 401 and attempt < max_retries - 1:
+                                item.download_url = await on_refresh()
+                                continue
+                            if response.status_code in (429, 502, 503, 504) and attempt < max_retries - 1:
+                                await asyncio.sleep(int(response.headers.get("Retry-After", 2 ** attempt)))
+                                continue
+                            response.raise_for_status()
+                            with open(temp_path, "wb") as f:
+                                async for chunk in response.aiter_bytes(4 * 1024 * 1024):
+                                    f.write(chunk)
+                                    pnl.file_progress(item.id, len(chunk))
+                        temp_path.rename(local_path)
+                        from src.downloader import set_file_timestamps, write_metadata_sidecar
+                        set_file_timestamps(local_path, item)
+                        write_metadata_sidecar(item, OUTPUT_DIR)
+                        pnl.file_finished(item.id)
+                        if del_remote and local_path.exists() and local_path.stat().st_size == item.size:
+                            try:
+                                await self.graph_client.delete_item(item.id)
+                            except Exception as e:
+                                self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
+                        pnl.files_done += 1
+                        pnl.bytes_done += item.size
+                        self._update_download_title(pnl)
+                        return DownloadResult(item=item, status=DownloadStatus.SUCCESS)
+                    except Exception as e:
+                        temp_path.unlink(missing_ok=True)
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        pnl.file_finished(item.id)
+                        pnl.files_done += 1
+                        self._update_download_title(pnl)
+                        return DownloadResult(item=item, status=DownloadStatus.FAILED, error=str(e))
+            pnl.file_finished(item.id)
+            return DownloadResult(item=item, status=DownloadStatus.FAILED, error="Download failed")
+
         # Process files with concurrency
         tasks = [asyncio.create_task(download_one(item)) for item in all_items]
 
@@ -399,14 +459,18 @@ class OneDriveApp(App):
                     f"Skip this file or stop all downloads?"
                 )
                 log.warning("%s", error_msg)
-                should_stop = await self.push_screen_wait(
-                    ErrorDialog(error_msg, allow_skip=True)
+                action = await self.push_screen_wait(
+                    ErrorDialog(error_msg, allow_skip=True, allow_download=True)
                 )
-                if should_stop:
+                if action == "stop":
                     for t in tasks:
                         t.cancel()
                     failed = True
                     break
+                if action == "download":
+                    # Re-download without hash verification
+                    dl_result = await _download_no_hash(result.item, delete_remote, panel)
+                    results.append(dl_result)
 
         succeeded = sum(1 for r in results if r.status == DownloadStatus.SUCCESS)
         skipped = sum(1 for r in results if r.status == DownloadStatus.SKIPPED)
