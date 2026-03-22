@@ -102,7 +102,7 @@ Open the URL in any browser, enter the code, and sign in with your Microsoft acc
 | Enter      | Expand / collapse folder          |
 | D          | Start download                    |
 | R          | Toggle remote deletion on/off     |
-| Q          | Quit                              |
+| Ctrl+C     | Quit                              |
 
 ### Download behavior
 
