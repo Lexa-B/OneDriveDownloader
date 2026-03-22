@@ -268,20 +268,25 @@ class OneDriveApp(App):
         results: list[DownloadResult] = []
         failed = False
 
-        async def download_one(item: DriveItem) -> DownloadResult:
+        async def _acquire_inflight(size: int) -> None:
             nonlocal inflight_bytes
-            # Wait until adding this file stays under the size cap,
-            # OR nothing else is in flight (so a single huge file can proceed)
             async with inflight_changed:
-                while inflight_bytes > 0 and inflight_bytes + item.size > MAX_INFLIGHT_BYTES:
+                while inflight_bytes > 0 and inflight_bytes + size > MAX_INFLIGHT_BYTES:
                     await inflight_changed.wait()
-                inflight_bytes += item.size
+                inflight_bytes += size
+
+        async def _release_inflight(size: int) -> None:
+            nonlocal inflight_bytes
+            async with inflight_changed:
+                inflight_bytes -= size
+                inflight_changed.notify_all()
+
+        async def download_one(item: DriveItem) -> DownloadResult:
+            await _acquire_inflight(item.size)
             try:
                 return await _download_one_impl(item)
             finally:
-                async with inflight_changed:
-                    inflight_bytes -= item.size
-                    inflight_changed.notify_all()
+                await _release_inflight(item.size)
 
         async def _download_one_impl(item: DriveItem) -> DownloadResult:
             # Ensure we have the hash — fetch per-item if needed
@@ -297,12 +302,14 @@ class OneDriveApp(App):
                     error=f"No hash available for {item.full_path}",
                 )
 
-            # Verify existing files outside the semaphore — this is disk I/O,
-            # not network, so it shouldn't block download slots
+            # Verify existing files outside the semaphore and inflight cap —
+            # this is disk I/O, not network, so it shouldn't block downloads
             if should_skip_file(item, OUTPUT_DIR):
+                await _release_inflight(item.size)
                 panel.file_verifying(item.id, item.name)
                 result = await asyncio.to_thread(verify_local_file, item, OUTPUT_DIR)
                 panel.file_finished(item.id)
+                await _acquire_inflight(item.size)  # re-acquire so download_one's finally can release
                 if result.status == DownloadStatus.SKIPPED:
                     write_metadata_sidecar(item, OUTPUT_DIR)
                     if delete_remote:
