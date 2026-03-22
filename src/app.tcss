@@ -43,14 +43,14 @@ StatusPanel {
     margin-top: 1;
 }
 
-ConfirmDialog {
+ConfirmDialog, ErrorDialog {
     align: center middle;
 }
 
 #confirm-container {
-    width: 60;
+    width: 70;
     height: auto;
-    max-height: 15;
+    max-height: 80%;
     border: thick $primary;
     background: $surface;
     padding: 1 2;
