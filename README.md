@@ -11,7 +11,7 @@ Built for one-time migrations off OneDrive — browse your folder tree, select w
 - **Chunked streaming downloads** — 4 MB chunks, up to 4 files in parallel (capped at 1 GB total in-flight), with per-file progress bars
 - **Sleep inhibition** — prevents system sleep during downloads (via `systemd-inhibit` on Linux)
 - **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch. Files without a hash (e.g. OneNote `.one` files) prompt the user to download without verification, skip, or stop. Already-downloaded files are re-verified by hash before any remote deletion. Verification uses all CPU cores via multiprocessing and runs in parallel with ongoing downloads
-- **Resume support** — re-running picks up where you left off; existing files are hash-verified locally instead of re-downloaded
+- **Resume support** — re-running picks up where you left off; existing files are hash-verified locally instead of re-downloaded. Mid-download interruptions (expired URLs, transport errors) resume from the last byte via HTTP Range headers instead of restarting from scratch
 - **Metadata preservation** — restores `lastModifiedDateTime` as local file mtime; writes `.metadata.json` sidecars with full file metadata (IDs, timestamps, hashes)
 - **Remote deletion (on by default)** — deletes originals from OneDrive only after the local copy is verified on disk (exists + correct size + hash match); toggle off with `R` before downloading
 - **Automatic retry** — retries on HTTP 429/502/503/504 and transport errors with exponential backoff (both for Graph API calls and file downloads); automatic token refresh on 401; download URLs are freshly fetched before each download and refreshed mid-stream if they expire during large multi-hour transfers
@@ -136,7 +136,7 @@ For each file (up to 4 in parallel, ≤1 GB total in-flight):
   ├─ Hash match → write metadata sidecar
   │   └─ (If deletion enabled) verify local file on disk, then delete remote
   ├─ Hash mismatch → HARD STOP all downloads (modal dialog)
-  └─ Download failure → retry up to 5× on transient errors, then skip
+  └─ Download failure → retry up to 5× with resume (HTTP Range), then skip
         │
         ▼
 Reload folder tree from OneDrive
@@ -151,6 +151,8 @@ If the OneDrive API omits the hash in folder listings (which happens occasionall
 ### Resume
 
 Re-running the app after an interrupted session automatically picks up where you left off. Files that already exist locally with the correct size are hash-verified against OneDrive's QuickXorHash instead of re-downloaded. If the hash matches, the metadata sidecar is refreshed and the remote is deleted (if deletion is enabled). If the hash doesn't match, the pipeline hard-stops just like a failed download.
+
+Within a single run, if a download is interrupted mid-stream (expired URL, server error, network drop), it resumes from the last byte using HTTP Range headers rather than restarting from scratch. The hash state is rebuilt from the existing partial data before continuing.
 
 ## Architecture
 
