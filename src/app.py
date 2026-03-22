@@ -42,7 +42,7 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs"
 CONFIG_PATH = PROJECT_ROOT / "config.json"
 CACHE_PATH = PROJECT_ROOT / ".msal_cache.json"
 LOG_PATH = PROJECT_ROOT / "onedrive_downloader.log"
-MAX_CONCURRENT = 4
+MAX_CONCURRENT = 6
 MAX_INFLIGHT_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB
 
 logging.basicConfig(
