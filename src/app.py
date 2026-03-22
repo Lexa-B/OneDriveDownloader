@@ -243,9 +243,14 @@ class OneDriveApp(App):
         # Collect all files from selected folders recursively
         all_items: list[DriveItem] = []
         all_folder_ids: list[str] = []
+        folder_children: dict[str, list[str]] = {}  # folder_id → child folder_ids
+        file_parents: dict[str, str] = {}  # file_id → parent folder_id
         panel.enum_status = "Enumerating files..."
         self.title = "\U0001f50d Enumerating\u2026"
-        await self._collect_files(folders, all_items, all_folder_ids, panel)
+        await self._collect_files(
+            folders, all_items, all_folder_ids,
+            folder_children, file_parents, panel,
+        )
         panel.enum_status = ""
 
         # Add individually selected files (dedup by id)
@@ -492,47 +497,40 @@ class OneDriveApp(App):
         skipped = sum(1 for r in results if r.status == DownloadStatus.SKIPPED)
         failed_results = [r for r in results if r.status == DownloadStatus.FAILED]
 
-        skipped_hashes = [r for r in results if r.status == DownloadStatus.MISSING_HASH]
+        # Determine which folders are safe to delete using enumeration
+        # data + results. No extra API calls.
+        if not failed and delete_remote:
+            # Folders with problem files (failed/skipped) are tainted
+            # Build reverse map: child folder → parent folder
+            folder_parent: dict[str, str] = {}
+            for pid, children in folder_children.items():
+                for cid in children:
+                    folder_parent[cid] = pid
 
-        # Delete remote folders top-down: check each is empty before deleting.
-        # If a parent is empty, one delete covers the whole subtree.
-        # If not, step into children and try those instead.
-        if not failed and delete_remote and not failed_results and not skipped_hashes:
-            # Build set of folder IDs we enumerated for quick lookup
-            enumerated = set(all_folder_ids)
+            tainted: set[str] = set()
+            for r in results:
+                if r.status in (DownloadStatus.FAILED, DownloadStatus.MISSING_HASH):
+                    # Taint this file's parent folder and all ancestors
+                    fid = file_parents.get(r.item.id)
+                    while fid:
+                        tainted.add(fid)
+                        fid = folder_parent.get(fid)
 
-            async def _delete_folder_tree(folder_id: str) -> None:
-                try:
-                    children = await self.graph_client.list_children(folder_id)
-                except Exception:
-                    return  # folder may already be gone
-                if not children:
-                    # Empty — safe to delete
+            # Top-down deletion: if a folder is clean, one recursive DELETE
+            # covers its entire subtree. If tainted, try its clean children.
+            async def _delete_clean(folder_id: str) -> None:
+                if folder_id not in tainted:
                     try:
                         await self.graph_client.delete_item(folder_id)
                     except Exception as e:
                         self.notify(f"Delete folder failed: {e}", severity="warning")
                     return
-                # Has children — only recurse into subfolders we enumerated,
-                # leave unknown items untouched
-                has_unknown = False
-                for item in children:
-                    if item.is_folder and item.id in enumerated:
-                        await _delete_folder_tree(item.id)
-                    else:
-                        has_unknown = True
-                if not has_unknown:
-                    # Everything inside was ours — safe to delete parent
-                    try:
-                        await self.graph_client.delete_item(folder_id)
-                    except Exception as e:
-                        self.notify(f"Delete folder failed: {e}", severity="warning")
+                # Tainted — try clean children
+                for child_id in folder_children.get(folder_id, []):
+                    await _delete_clean(child_id)
 
-            # Start from top-level selected folders (last entries in depth-first list)
-            top_level = {f.item_id for f in folders}
-            for folder_id in reversed(all_folder_ids):
-                if folder_id in top_level:
-                    await _delete_folder_tree(folder_id)
+            for folder in folders:
+                await _delete_clean(folder.item_id)
 
         if not failed:
             summary = f"Done! {succeeded} downloaded, {skipped} skipped, {len(failed_results)} failed"
@@ -562,6 +560,8 @@ class OneDriveApp(App):
         folders: list[FolderNode],
         files: list[DriveItem],
         folder_ids: list[str],
+        folder_children: dict[str, list[str]],
+        file_parents: dict[str, str],
         panel: StatusPanel | None = None,
     ) -> None:
         for folder in folders:
@@ -575,14 +575,22 @@ class OneDriveApp(App):
             child_folders = [i for i in items if i.is_folder]
 
             # Create local directory for every folder (preserves empty ones)
+            folder_children[folder.item_id] = []
             for item in child_folders:
                 local_dir = OUTPUT_DIR / item.full_path
                 local_dir.mkdir(parents=True, exist_ok=True)
+                folder_children[folder.item_id].append(item.id)
+
+            for item in child_files:
+                file_parents[item.id] = folder.item_id
 
             files.extend(child_files)
             for item in child_folders:
                 sub_folder = FolderNode(item_id=item.id, name=item.name, size=item.size)
-                await self._collect_files([sub_folder], files, folder_ids, panel)
+                await self._collect_files(
+                    [sub_folder], files, folder_ids,
+                    folder_children, file_parents, panel,
+                )
 
             # Add after recursing so children come first (depth-first order)
             folder_ids.append(folder.item_id)
