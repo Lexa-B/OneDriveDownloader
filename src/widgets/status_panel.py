@@ -56,6 +56,7 @@ class StatusPanel(Vertical):
     bytes_total: reactive[int] = reactive(0)
     enum_status: reactive[str] = reactive("")
     _download_start: float = 0.0
+    _last_progress_update: float = 0.0
     # Per-file progress: {item_id: (filename, bytes_done, bytes_total)}
     _active_files: dict[str, tuple[str, int, int]] = {}
 
@@ -68,6 +69,7 @@ class StatusPanel(Vertical):
 
     def on_mount(self) -> None:
         self._active_files = {}
+        self._last_progress_update = 0.0
         self._update_display()
 
     def watch_selected_count(self) -> None:
@@ -106,7 +108,11 @@ class StatusPanel(Vertical):
         if item_id in self._active_files:
             name, done, total = self._active_files[item_id]
             self._active_files[item_id] = (name, done + chunk_bytes, total)
-            self._update_display()
+            # Throttle display updates to max 4/sec to avoid CPU spin
+            now = time.monotonic()
+            if now - self._last_progress_update >= 0.25:
+                self._last_progress_update = now
+                self._update_display()
 
     def file_reset_progress(self, item_id: str) -> None:
         """Reset per-file progress to 0 (used on download retry)."""
