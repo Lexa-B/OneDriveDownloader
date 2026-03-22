@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
+import struct
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
@@ -18,6 +21,69 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB
+_HASH_WORKERS: ProcessPoolExecutor | None = None
+
+
+def _get_hash_pool() -> ProcessPoolExecutor:
+    global _HASH_WORKERS
+    if _HASH_WORKERS is None:
+        _HASH_WORKERS = ProcessPoolExecutor()
+    return _HASH_WORKERS
+
+
+def _hash_file_chunk(file_path: str, offset: int, length: int, start_shift: int) -> list[int]:
+    """Hash a chunk of a file, returning partial QuickXorHash cells.
+
+    Runs in a worker process. The caller combines results with XOR.
+    """
+    from src.quickxor import QuickXorHash
+    hasher = QuickXorHash()
+    hasher._shift_so_far = start_shift
+    with open(file_path, "rb") as f:
+        f.seek(offset)
+        remaining = length
+        while remaining > 0:
+            chunk = f.read(min(remaining, CHUNK_SIZE))
+            if not chunk:
+                break
+            hasher.update(chunk)
+            remaining -= len(chunk)
+    return hasher._data
+
+
+def parallel_hash_file(file_path: Path, file_size: int) -> str:
+    """Compute QuickXorHash of a file using multiple processes."""
+    from src.quickxor import SHIFT, WIDTH_IN_BITS
+
+    num_workers = os.cpu_count() or 4
+    chunk_size = max(CHUNK_SIZE, file_size // num_workers)
+    pool = _get_hash_pool()
+
+    futures = []
+    offset = 0
+    while offset < file_size:
+        length = min(chunk_size, file_size - offset)
+        start_shift = (offset * SHIFT) % WIDTH_IN_BITS
+        futures.append(pool.submit(_hash_file_chunk, str(file_path), offset, length, start_shift))
+        offset += length
+
+    # Combine partial results with XOR
+    combined = [0, 0, 0]
+    for future in futures:
+        partial = future.result()
+        for i in range(3):
+            combined[i] ^= partial[i]
+
+    # Finalize: pack cells + XOR in file length (same as QuickXorHash.digest)
+    MASK_64 = (1 << 64) - 1
+    rgb = bytearray(20)
+    struct.pack_into("<Q", rgb, 0, combined[0] & MASK_64)
+    struct.pack_into("<Q", rgb, 8, combined[1] & MASK_64)
+    struct.pack_into("<I", rgb, 16, combined[2] & 0xFFFFFFFF)
+    length_bytes = struct.pack("<q", file_size)
+    for i, b in enumerate(length_bytes):
+        rgb[12 + i] ^= b
+    return base64.b64encode(bytes(rgb)).decode("ascii")
 
 
 class DownloadStatus(Enum):
@@ -60,11 +126,7 @@ def verify_local_file(item: DriveItem, output_dir: Path) -> DownloadResult:
         )
     if item.quick_xor_hash is None:
         return DownloadResult(item=item, status=DownloadStatus.MISSING_HASH)
-    hasher = QuickXorHash()
-    with open(local_path, "rb") as f:
-        while chunk := f.read(CHUNK_SIZE):
-            hasher.update(chunk)
-    computed = hasher.base64_digest()
+    computed = parallel_hash_file(local_path, item.size)
     if computed != item.quick_xor_hash:
         return DownloadResult(
             item=item, status=DownloadStatus.HASH_MISMATCH,

@@ -283,39 +283,38 @@ class OneDriveApp(App):
                     inflight_changed.notify_all()
 
         async def _download_one_impl(item: DriveItem) -> DownloadResult:
+            # Ensure we have the hash — fetch per-item if needed
+            if item.quick_xor_hash is None:
+                fetched = await self.graph_client.get_item(item.id)
+                item.quick_xor_hash = fetched.quick_xor_hash
+                item.download_url = fetched.download_url
+
+            if item.quick_xor_hash is None:
+                return DownloadResult(
+                    item=item,
+                    status=DownloadStatus.MISSING_HASH,
+                    error=f"No hash available for {item.full_path}",
+                )
+
+            # Verify existing files outside the semaphore — this is disk I/O,
+            # not network, so it shouldn't block download slots
+            if should_skip_file(item, OUTPUT_DIR):
+                panel.file_verifying(item.id, item.name)
+                result = await asyncio.to_thread(verify_local_file, item, OUTPUT_DIR)
+                panel.file_finished(item.id)
+                if result.status == DownloadStatus.SKIPPED:
+                    write_metadata_sidecar(item, OUTPUT_DIR)
+                    if delete_remote:
+                        try:
+                            await self.graph_client.delete_item(item.id)
+                        except Exception as e:
+                            self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
+                panel.files_done += 1
+                panel.bytes_done += item.size
+                self._update_download_title(panel)
+                return result
+
             async with semaphore:
-                # Ensure we have the hash — fetch per-item if needed
-                if item.quick_xor_hash is None:
-                    fetched = await self.graph_client.get_item(item.id)
-                    item.quick_xor_hash = fetched.quick_xor_hash
-                    item.download_url = fetched.download_url
-
-                if item.quick_xor_hash is None:
-                    return DownloadResult(
-                        item=item,
-                        status=DownloadStatus.MISSING_HASH,
-                        error=f"No hash available for {item.full_path}",
-                    )
-
-                # If local file already exists, verify size + hash instead of re-downloading
-                # Run in thread to avoid blocking the event loop on large files
-                if should_skip_file(item, OUTPUT_DIR):
-                    panel.file_verifying(item.id, item.name)
-                    result = await asyncio.to_thread(verify_local_file, item, OUTPUT_DIR)
-                    panel.file_finished(item.id)
-                    if result.status == DownloadStatus.SKIPPED:
-                        # Verified — refresh metadata and delete remote if enabled
-                        write_metadata_sidecar(item, OUTPUT_DIR)
-                        if delete_remote:
-                            try:
-                                await self.graph_client.delete_item(item.id)
-                            except Exception as e:
-                                self.notify(f"Delete failed: {item.name}: {e}", severity="warning")
-                    panel.files_done += 1
-                    panel.bytes_done += item.size
-                    self._update_download_title(panel)
-                    return result
-
                 # Always fetch a fresh download URL — cached ones from
                 # enumeration expire and cause 401 errors on large batches
                 fetched = await self.graph_client.get_item(item.id)
