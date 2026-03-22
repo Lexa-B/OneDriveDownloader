@@ -8,9 +8,9 @@ Built for one-time migrations off OneDrive — browse your folder tree, select w
 
 - **Interactive folder tree** — lazy-loaded from OneDrive, browse and select folders or individual files
 - **Checkbox selection** — toggle entire folders or pick specific files; partial-selection indicators for mixed states
-- **Chunked streaming downloads** — 4 MB chunks, up to 4 files in parallel, with per-file progress bars
+- **Chunked streaming downloads** — 4 MB chunks, up to 4 files in parallel (capped at 1 GB total in-flight), with per-file progress bars
 - **Sleep inhibition** — prevents system sleep during downloads (via `systemd-inhibit` on Linux)
-- **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch. Already-downloaded files are re-verified by hash before any remote deletion
+- **Hash verification** — computes Microsoft's QuickXorHash inline during download and verifies against OneDrive's hash; hard-stops on any mismatch. Files without a hash (e.g. OneNote `.one` files) prompt the user to download without verification, skip, or stop. Already-downloaded files are re-verified by hash before any remote deletion
 - **Resume support** — re-running picks up where you left off; existing files are hash-verified locally instead of re-downloaded
 - **Metadata preservation** — restores `lastModifiedDateTime` as local file mtime; writes `.metadata.json` sidecars with full file metadata (IDs, timestamps, hashes)
 - **Remote deletion (on by default)** — deletes originals from OneDrive only after the local copy is verified on disk (exists + correct size + hash match); toggle off with `R` before downloading
@@ -128,13 +128,14 @@ Select folders / files (Space to toggle)
 Press D → collect all files from selected folders
         │
         ▼
-For each file (up to 4 in parallel):
+For each file (up to 4 in parallel, ≤1 GB total in-flight):
+  ├─ No hash available? → prompt: download without verification / skip / stop
   ├─ Already local with matching size?
   │   ├─ Yes → verify hash of local copy
   │   └─ No  → download in 4 MB chunks, compute hash inline
   ├─ Hash match → write metadata sidecar
   │   └─ (If deletion enabled) verify local file on disk, then delete remote
-  ├─ Hash mismatch → HARD STOP all downloads
+  ├─ Hash mismatch → HARD STOP all downloads (modal dialog)
   └─ Download failure → retry up to 5× on transient errors, then skip
         │
         ▼
@@ -145,7 +146,7 @@ Reload folder tree from OneDrive
 
 OneDrive Personal uses [QuickXorHash](https://learn.microsoft.com/en-us/onedrive/developer/code-snippets/quickxorhash), a proprietary Microsoft hash algorithm. For fresh downloads, the hash is computed inline while streaming each chunk. For already-downloaded files, the local copy is read and hashed. In both cases, if the hash doesn't match OneDrive's hash, the pipeline hard-stops: all in-flight downloads are cancelled and no corrupt file is kept. Remote files are never deleted unless the local copy has been verified on disk.
 
-If the OneDrive API omits the hash in folder listings (which happens occasionally), the app fetches it via a per-item API call before downloading.
+If the OneDrive API omits the hash in folder listings (which happens occasionally), the app fetches it via a per-item API call before downloading. Some file types (notably OneNote `.one` files) never have a hash — for these, a dialog lets you choose to download without verification, skip, or stop.
 
 ### Resume
 
@@ -183,8 +184,8 @@ src/
 |---------|-------|-----|
 | `AADSTS` error codes during sign-in | Azure app misconfigured | Verify: account type is "Personal Microsoft accounts only", public client flows enabled, no redirect URI set |
 | "No cached account — re-run the app" | Token cache expired or corrupted | Delete `.msal_cache.json` and re-run — you'll be prompted to sign in again |
-| "PIPELINE STOPPED: HASH_MISMATCH" | Downloaded bytes don't match OneDrive's hash | This is a safety feature. Re-run the app — the file will be retried. If it persists, the file may be corrupted on OneDrive's side |
-| "PIPELINE STOPPED: MISSING_HASH" | OneDrive API returned no hash even after per-item fetch | Rare server-side issue. Wait and retry later |
+| "PIPELINE STOPPED: HASH_MISMATCH" | Downloaded bytes don't match OneDrive's hash | This is a safety feature shown as a modal dialog. Re-run the app — the file will be retried. If it persists, the file may be corrupted on OneDrive's side |
+| "No hash available" dialog | File type (e.g. OneNote `.one`) doesn't support hash verification | Choose "Download without verification" to download anyway, "Skip" to continue with other files, or "Stop" to cancel |
 | Downloads seem slow / pausing | HTTP 429 rate limiting from Microsoft | The app retries automatically (respects the server's Retry-After header). Just wait — it will resume |
 | Many files fail with 401 Unauthorized | Download URLs expired during a large batch | The app fetches a fresh download URL before each file and refreshes mid-stream if it expires during long transfers |
 | Files fail with 503 Service Unavailable | OneDrive server temporarily overloaded | The app retries up to 5 times with exponential backoff automatically |
