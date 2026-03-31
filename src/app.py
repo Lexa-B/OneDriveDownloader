@@ -347,7 +347,7 @@ class OneDriveApp(App):
                     fresh = await self.graph_client.get_item(item.id)
                     return fresh.download_url
 
-                async with httpx.AsyncClient(timeout=300.0) as dl_client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30, read=120, write=30, pool=30)) as dl_client:
                     result = await download_file(
                         item=item,
                         download_url=item.download_url,
@@ -395,7 +395,7 @@ class OneDriveApp(App):
                 fresh = await self.graph_client.get_item(item.id)
                 return fresh.download_url
 
-            async with httpx.AsyncClient(timeout=300.0) as dl_client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30, read=120, write=30, pool=30)) as dl_client:
                 local_path = OUTPUT_DIR / item.full_path
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 temp_path = local_path.with_suffix(local_path.suffix + ".tmp")
