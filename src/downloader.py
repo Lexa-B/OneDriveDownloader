@@ -95,6 +95,30 @@ def parallel_hash_file(file_path: Path, file_size: int) -> str:
     return base64.b64encode(bytes(rgb)).decode("ascii")
 
 
+def _rebuild_hash_state(temp_path: Path, size: int) -> list[int]:
+    """Rebuild partial QuickXorHash cells from a .tmp file using all cores."""
+    from src.quickxor import SHIFT, WIDTH_IN_BITS
+
+    num_workers = os.cpu_count() or 4
+    chunk_size = max(CHUNK_SIZE, size // num_workers)
+    pool = _get_hash_pool()
+
+    futures = []
+    offset = 0
+    while offset < size:
+        length = min(chunk_size, size - offset)
+        start_shift = (offset * SHIFT) % WIDTH_IN_BITS
+        futures.append(pool.submit(_hash_file_chunk, str(temp_path), offset, length, start_shift))
+        offset += length
+
+    combined = [0, 0, 0]
+    for future in futures:
+        partial = future.result()
+        for i in range(3):
+            combined[i] ^= partial[i]
+    return combined
+
+
 class DownloadStatus(Enum):
     SUCCESS = auto()
     HASH_MISMATCH = auto()
@@ -199,11 +223,15 @@ async def download_file(
             on_retry()
 
         # On resume, rebuild hash state from existing .tmp data
+        # Uses parallel hashing across all cores to avoid blocking
         hasher = QuickXorHash()
         if resume_offset > 0 and temp_path.exists():
-            with open(temp_path, "rb") as rf:
-                while chunk := rf.read(CHUNK_SIZE):
-                    hasher.update(chunk)
+            partial_hash = await asyncio.to_thread(
+                _rebuild_hash_state, temp_path, resume_offset,
+            )
+            hasher._data = partial_hash
+            hasher._shift_so_far = (resume_offset * 11) % 160
+            hasher._length_so_far = resume_offset
             if on_progress:
                 on_progress(resume_offset)
 
