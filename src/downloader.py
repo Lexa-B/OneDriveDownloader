@@ -188,7 +188,11 @@ async def download_file(
 
     max_retries = 5
     last_error: Exception | None = None
-    resume_offset = 0  # bytes already written to temp_path
+
+    # Resume from existing .tmp file (cross-session resume)
+    resume_offset = 0
+    if temp_path.exists():
+        resume_offset = temp_path.stat().st_size
 
     for attempt in range(max_retries):
         if attempt > 0 and on_retry:
