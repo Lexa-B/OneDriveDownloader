@@ -200,6 +200,7 @@ async def download_file(
     on_progress: Callable[[int], None] | None = None,
     on_retry: Callable[[], None] | None = None,
     on_refresh_url: Callable[[], Any] | None = None,  # async () -> str
+    on_resume_done: Callable[[], None] | None = None,
 ) -> DownloadResult:
     if item.quick_xor_hash is None:
         return DownloadResult(item=item, status=DownloadStatus.MISSING_HASH)
@@ -232,6 +233,8 @@ async def download_file(
             hasher._data = partial_hash
             hasher._shift_so_far = (resume_offset * 11) % 160
             hasher._length_so_far = resume_offset
+            if on_resume_done:
+                on_resume_done()
             if on_progress:
                 on_progress(resume_offset)
 

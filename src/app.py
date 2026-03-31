@@ -335,13 +335,24 @@ class OneDriveApp(App):
                 fetched = await self.graph_client.get_item(item.id)
                 item.download_url = fetched.download_url
 
-                panel.file_started(item.id, item.name, item.size)
+                # Check if resuming from a .tmp file — show spinner during hash rebuild
+                temp_path = (OUTPUT_DIR / item.full_path).with_suffix(
+                    (OUTPUT_DIR / item.full_path).suffix + ".tmp"
+                )
+                resuming = temp_path.exists() and temp_path.stat().st_size > 0
+                if resuming:
+                    panel.file_verifying(item.id, item.name, label="Rebuilding hash")
+                else:
+                    panel.file_started(item.id, item.name, item.size)
 
                 def on_progress(chunk_bytes: int) -> None:
                     panel.file_progress(item.id, chunk_bytes)
 
                 def on_retry() -> None:
                     panel.file_reset_progress(item.id)
+
+                def on_resume_done() -> None:
+                    panel.file_started(item.id, item.name, item.size)
 
                 async def on_refresh_url() -> str:
                     fresh = await self.graph_client.get_item(item.id)
@@ -356,6 +367,7 @@ class OneDriveApp(App):
                         on_progress=on_progress,
                         on_retry=on_retry,
                         on_refresh_url=on_refresh_url,
+                        on_resume_done=on_resume_done,
                     )
 
                 panel.file_finished(item.id)
